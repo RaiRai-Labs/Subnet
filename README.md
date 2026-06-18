@@ -22,7 +22,10 @@ rairai_subnet/
     │   ├── config.py       # pydantic-settings (env / .env)
     │   ├── database.py     # async engine + session (imported from RaiRaiApp)
     │   ├── migrations.py   # create_all bootstrap (no Alembic for MVP)
+    │   ├── validator.py    # validator workflow: query miners, average, complete
     │   └── scoring.py      # MAE, rank score, weight normalization, commit hash
+    ├── miners/
+    │   └── mock.py         # 3 mock miners with fixed predictions (4.1 / 4.3 / 4.2)
     ├── models/             # SQLAlchemy ORM
     │   ├── farm.py             # Farm, FarmUserLink   (imported from RaiRaiApp)
     │   ├── farm_analysis.py    # FarmAnalysis         (imported from RaiRaiApp)
@@ -80,13 +83,21 @@ uv run uvicorn app.main:app --reload --port 8000
 
 | Method & path | Description |
 |---------------|-------------|
-| `POST /tasks` | Create a prediction task |
-| `GET /tasks` | List tasks (optional `?status=open\|closed\|scored`) |
-| `GET /tasks/{task_id}` | Get a task |
-| `POST /responses/commit` | Miner commit phase (submit hash) |
+| `POST /tasks` | Submit farm/crop data → generates a task id, stores it, confirms acceptance |
+| `POST /tasks/{task_id}/validate` | Run the validator workflow: query mock miners, average, complete the task |
+| `GET /tasks` | List tasks (optional `?status=open\|completed\|closed\|scored`) |
+| `GET /tasks/{task_id}` | Get a task (incl. `average_prediction`) |
+| `POST /responses/commit` | Miner commit phase (submit hash) — advanced commit-reveal path |
 | `POST /responses/reveal` | Miner reveal phase (verifies hash) |
 | `POST /responses/ground-truth` | Farmer reports actual yield |
 | `POST /responses/score/{task_id}` | Score revealed miners → MAE, score, weights |
+
+### Mock miners
+
+The MVP validator workflow queries three in-process mock miners with fixed
+predictions (`app/miners/mock.py`): `miner_a → 4.1`, `miner_b → 4.3`,
+`miner_c → 4.2`. `POST /tasks/{task_id}/validate` sends the task to all three,
+stores each response, averages them, and marks the task `completed`.
 
 ### Commit hash convention
 
@@ -102,13 +113,27 @@ score  = 1 / (1 + MAE)
 weight = score / sum(scores)        # normalized for Yuma Consensus
 ```
 
-## Example flow
+## Example flow (MVP: mock miners + averaging)
 
 ```bash
 B=http://127.0.0.1:8000
-curl -X POST $B/tasks -H 'Content-Type: application/json' \
-  -d '{"task_id":"task_001","crop":"rice","province":"Chiang Mai","field_size":15,"ndvi":[0.3,0.5,0.7],"weather":[{"temp":28,"rain":4}]}'
 
+# 1. Submit farm/crop data — the service generates and returns a task id
+curl -X POST $B/tasks -H 'Content-Type: application/json' \
+  -d '{"crop":"rice","province":"Chiang Mai","field_size":15,"ndvi":[0.3,0.5,0.7],"weather":[{"temp":28,"rain":4}]}'
+# -> {"task_id":"task_<hex>","status":"open","message":"Prediction task accepted"}
+
+# 2. Run the validator workflow against the 3 mock miners
+curl -X POST $B/tasks/task_<hex>/validate
+# -> averages 4.1, 4.3, 4.2 = 4.2, marks the task "completed"
+
+curl $B/tasks/task_<hex>   # average_prediction = 4.2, status = completed
+```
+
+## Advanced flow (commit-reveal + scoring, spec §8–10)
+
+```bash
+B=http://127.0.0.1:8000
 # miner commits sha256("4.1:0.82:salt"), then reveals
 curl -X POST $B/responses/reveal -H 'Content-Type: application/json' \
   -d '{"task_id":"task_001","miner_hotkey":"miner_A","expected_yield":4.1,"confidence":0.82,"nonce":"salt"}'

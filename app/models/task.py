@@ -24,6 +24,7 @@ from app.core.database import Base
 class TaskStatus(str, enum.Enum):
     open = "open"             # created, accepting miner responses
     closed = "closed"        # no longer accepting responses (reveal phase)
+    completed = "completed"  # miners queried, predictions aggregated
     scored = "scored"        # ground truth received and miners scored
 
 
@@ -51,6 +52,10 @@ class PredictionTask(Base):
         index=True,
     )
 
+    # Aggregate of miner predictions, filled by the validator workflow.
+    average_prediction = Column(Float, nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     closed_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
     scored_at = Column(DateTime(timezone=True), nullable=True)

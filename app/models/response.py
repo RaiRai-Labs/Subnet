@@ -40,7 +40,8 @@ class MinerResponse(Base):
     miner_uid = Column(Integer, nullable=True, index=True)
 
     # --- Commit phase ---
-    commit_hash = Column(String, nullable=False)
+    # Nullable: direct (mock) miner predictions skip the commit-reveal flow.
+    commit_hash = Column(String, nullable=True)
     committed_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # --- Reveal phase ---
