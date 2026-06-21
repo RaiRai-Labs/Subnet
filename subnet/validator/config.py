@@ -1,9 +1,9 @@
-"""Validator configuration.
+"""Neuron configuration.
 
-bittensor's ``Config`` (v10) only absorbs its own sections (wallet, subtensor,
-axon, logging), so we build that for the chain-native pieces and attach our
-custom fields (mock, netuid, neuron.*) onto the same object — which `bt.Wallet`
-/ `bt.Subtensor` still accept.
+bittensor's ``Config(parser)`` (v10) does not reliably apply CLI overrides for
+its own sections, so we parse a single argparse parser ourselves and flatten the
+dotted dests (e.g. ``wallet.name``) into a nested ``bt.Config`` — which
+`bt.Wallet` / `bt.Subtensor` / `bt.Axon` accept directly.
 """
 
 import argparse
@@ -11,8 +11,7 @@ import argparse
 import bittensor as bt
 
 
-def _custom_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(add_help=False)
+def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--netuid", type=int, default=1, help="Subnet netuid.")
     parser.add_argument(
         "--mock",
@@ -22,46 +21,44 @@ def _custom_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--neuron.forward_interval",
-        dest="forward_interval",
         type=float,
         default=5.0,
         help="Seconds to wait between forward passes.",
     )
     parser.add_argument(
         "--neuron.epoch_length",
-        dest="epoch_length",
         type=int,
         default=10,
         help="Number of forward passes between weight settings.",
     )
     parser.add_argument(
         "--neuron.moving_average_alpha",
-        dest="moving_average_alpha",
         type=float,
         default=0.2,
         help="EMA weight for new rewards when updating miner scores.",
     )
-    return parser
+
+
+def _flatten_into_config(namespace: argparse.Namespace) -> bt.Config:
+    """Turn a flat namespace with dotted keys into a nested bt.Config."""
+    config = bt.Config()
+    for key, value in vars(namespace).items():
+        parts = key.split(".")
+        node = config
+        for part in parts[:-1]:
+            if part not in node or not isinstance(node[part], dict):
+                node[part] = bt.Config()
+            node = node[part]
+        node[parts[-1]] = value
+    return config
 
 
 def get_config() -> bt.Config:
-    # Chain-native config (wallet / subtensor / axon / logging).
-    bt_parser = argparse.ArgumentParser()
-    bt.Wallet.add_args(bt_parser)
-    bt.Subtensor.add_args(bt_parser)
-    bt.Axon.add_args(bt_parser)
-    bt.logging.add_args(bt_parser)
-    config = bt.Config(bt_parser)
-
-    # Our custom fields, parsed separately and attached.
-    args, _ = _custom_parser().parse_known_args()
-    config.netuid = args.netuid
-    config.mock = args.mock
-
-    neuron = bt.Config(argparse.ArgumentParser())
-    neuron.forward_interval = args.forward_interval
-    neuron.epoch_length = args.epoch_length
-    neuron.moving_average_alpha = args.moving_average_alpha
-    config.neuron = neuron
-
-    return config
+    parser = argparse.ArgumentParser()
+    add_args(parser)
+    bt.Wallet.add_args(parser)
+    bt.Subtensor.add_args(parser)
+    bt.Axon.add_args(parser)
+    bt.logging.add_args(parser)
+    args, _ = parser.parse_known_args()
+    return _flatten_into_config(args)

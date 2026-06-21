@@ -48,14 +48,23 @@ class BaseValidatorNeuron(BaseNeuron):
             )
             return
 
-        self.subtensor.set_weights(
+        result = self.subtensor.set_weights(
             wallet=self.wallet,
             netuid=self.config.netuid,
             uids=self.metagraph.uids,
             weights=weights,
-            wait_for_inclusion=False,
+            wait_for_inclusion=True,
         )
-        bt.logging.info("Weights set on chain.")
+        # set_weights may return an ExtrinsicResponse or a (success, msg) tuple.
+        if isinstance(result, tuple):
+            success, message = result
+        else:
+            success = getattr(result, "success", bool(result))
+            message = getattr(result, "message", "")
+        if success:
+            bt.logging.info("Weights submitted on chain (commit-reveal if enabled).")
+        else:
+            bt.logging.warning(f"set_weights failed: {message}")
 
     # --- run loop ---
     def run(self) -> None:

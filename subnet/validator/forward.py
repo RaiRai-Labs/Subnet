@@ -7,6 +7,17 @@ from app.miners.mock import MOCK_MINERS
 from subnet.validator.challenge import Challenge, generate_challenge
 
 
+def get_query_uids(validator) -> list[int]:
+    """Miner uids to query: all in mock mode; serving non-self uids on chain."""
+    if validator.config.mock:
+        return list(validator.metagraph.uids)
+    return [
+        int(uid)
+        for uid in validator.metagraph.uids
+        if int(uid) != validator.uid and validator.metagraph.axons[uid].is_serving
+    ]
+
+
 def query_miners(validator, challenge: Challenge, uids: list[int]) -> list[float | None]:
     """Return each miner's predicted yield (None if it did not respond)."""
     if validator.config.mock:
@@ -22,7 +33,11 @@ def query_miners(validator, challenge: Challenge, uids: list[int]) -> list[float
 
 def forward(validator) -> None:
     challenge = generate_challenge()
-    uids = list(validator.metagraph.uids)
+    uids = get_query_uids(validator)
+
+    if not uids:
+        bt.logging.info(f"step {validator.step} | no miners to query yet")
+        return
 
     predictions = query_miners(validator, challenge, uids)
 
