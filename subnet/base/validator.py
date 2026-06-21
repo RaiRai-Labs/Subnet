@@ -7,6 +7,7 @@ import bittensor as bt
 import numpy as np
 
 from app.core.scoring import normalize_weights
+from subnet import __spec_version__
 from subnet.base.neuron import BaseNeuron
 
 
@@ -22,6 +23,24 @@ class BaseValidatorNeuron(BaseNeuron):
 
         # EMA of rewards, indexed by miner uid.
         self.scores = np.zeros(self.metagraph.n, dtype=np.float64)
+
+        # Detect commit-reveal once; set_weights routes accordingly.
+        self._last_weights_block = 0
+        if self.config.mock or self.subtensor is None:
+            self.commit_reveal_enabled = False
+            self.weights_rate_limit = 0
+        else:
+            self.commit_reveal_enabled = self.subtensor.commit_reveal_enabled(
+                self.config.netuid
+            )
+            hp = self.subtensor.get_subnet_hyperparameters(self.config.netuid)
+            self.weights_rate_limit = int(getattr(hp, "weights_rate_limit", 0) or 0)
+            bt.logging.info(
+                f"Commit-reveal weights "
+                f"{'ENABLED' if self.commit_reveal_enabled else 'disabled'} "
+                f"on netuid {self.config.netuid} | "
+                f"weights_rate_limit={self.weights_rate_limit} blocks"
+            )
 
         self.step = 0
         self.should_exit = False
@@ -48,11 +67,26 @@ class BaseValidatorNeuron(BaseNeuron):
             )
             return
 
+        # Respect the chain's weights rate limit (one set per N blocks).
+        current_block = self.subtensor.get_current_block()
+        elapsed = current_block - self._last_weights_block
+        if self._last_weights_block and elapsed < self.weights_rate_limit:
+            bt.logging.debug(
+                f"Skip set_weights: {elapsed}/{self.weights_rate_limit} blocks since last set"
+            )
+            return
+
+        mode = "commit-reveal" if self.commit_reveal_enabled else "direct"
+        bt.logging.info(f"Submitting weights via {mode} (version_key={__spec_version__})")
+
+        # set_weights auto-routes to the commit-reveal extrinsic when the subnet
+        # has it enabled; version_key ties a commit to its later reveal.
         result = self.subtensor.set_weights(
             wallet=self.wallet,
             netuid=self.config.netuid,
             uids=self.metagraph.uids,
             weights=weights,
+            version_key=__spec_version__,
             wait_for_inclusion=True,
         )
         # set_weights may return an ExtrinsicResponse or a (success, msg) tuple.
@@ -62,7 +96,8 @@ class BaseValidatorNeuron(BaseNeuron):
             success = getattr(result, "success", bool(result))
             message = getattr(result, "message", "")
         if success:
-            bt.logging.info("Weights submitted on chain (commit-reveal if enabled).")
+            self._last_weights_block = current_block
+            bt.logging.info(f"Weights submitted on chain ({mode}) at block {current_block}.")
         else:
             bt.logging.warning(f"set_weights failed: {message}")
 

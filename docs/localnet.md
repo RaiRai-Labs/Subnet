@@ -29,6 +29,16 @@ The owner/validator (uid 0) gets a `validator_permit` automatically on localnet,
 so no staking is required to set weights. (Alpha staking is disabled until the
 subnet is activated — `SubtokenDisabled`.)
 
+### Activate the subnet
+
+Dynamic-TAO subnets start inactive (`is_subnet_active(netuid) == False`). Activate
+emissions with a `start_call` from the owner:
+
+```python
+subtensor.start_call(wallet=validator_wallet, netuid=2)  # -> success
+# subtensor.is_subnet_active(2) == True
+```
+
 ## 3. Run the miner
 
 The chain rejects loopback IPs (`Custom error 11 = InvalidIpAddress`), so
@@ -53,12 +63,24 @@ uv run python -m neurons.validator \
 ```
 
 Each step it poses a task, queries the miner over the dendrite, scores by MAE
-rank, and submits weights every `epoch_length` steps.
+rank, and submits weights (subject to the rate limit below).
 
-> The subnet has `commit_reveal_weights_enabled = True`, so `set_weights`
-> succeeds (`success=True`) but stores an encrypted commit — the plaintext
-> `Weights` storage stays empty until the reveal window. Activating emissions
-> (`is_subnet_active = False`) needs a `start_call`; not required for this test.
+### Commit-reveal weights
+
+The subnet has `commit_reveal_weights_enabled = True`. The validator detects this
+on startup and routes `set_weights` through the commit-reveal path (bittensor v10
+commit-reveal v4), tagging each commit with `version_key = subnet.__spec_version__`.
+`set_weights` returns `success=True` and stores an **encrypted timelocked commit**
+— the plaintext `Weights` storage stays empty until the reveal window
+(`get_subnet_reveal_period_epochs`).
+
+The validator also honors `weights_rate_limit` (100 blocks here): it only commits
+once enough blocks have elapsed since its last successful commit, so it won't spam
+rejected commits between rate-limit windows.
+
+> Note: on a fast-blocks localnet the timelock reveal pipeline (drand) may not
+> surface revealed weights in plaintext storage; the commit extrinsic itself is
+> accepted (`success=True`). On testnet/mainnet the reveal completes normally.
 
 ## One-shot harness
 

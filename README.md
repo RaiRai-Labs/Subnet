@@ -10,14 +10,20 @@ against real harvest outcomes (MAE → rank score → normalized consensus weigh
 Built with **FastAPI**, **Pydantic v2**, **SQLAlchemy (async)** and **PostgreSQL**,
 managed with **uv**.
 
-## Validator neuron
+## Bittensor neurons
 
-The Bittensor validator neuron lives in `neurons/validator.py` (library code in
-`subnet/`). It runs a loop that poses a yield-prediction task, queries miners,
-scores them (MAE → rank score), keeps an EMA of per-miner scores, and sets
-normalized weights every `epoch_length` steps.
+The validator and miner neurons live in `neurons/` (library code in `subnet/`),
+built on the bittensor SDK (`bittensor>=10.4.1`).
 
-Run it offline (mock metagraph + in-process mock miners — no wallet or chain):
+- **Validator** poses a yield-prediction task, queries miners over dendrite/axon,
+  scores them (MAE → rank → EMA), and sets normalized weights every
+  `epoch_length` steps — using **commit-reveal** when the subnet has it enabled.
+- **Miner** serves a `YieldPredictionSynapse` axon and returns an expected yield
+  (an NDVI-based baseline) with a confidence.
+
+### Offline (mock) run
+
+No wallet or chain — mock metagraph + in-process mock miners:
 
 ```bash
 uv run python -m neurons.validator --mock
@@ -25,32 +31,57 @@ uv run python -m neurons.validator --mock
 uv run python -m neurons.validator --mock --neuron.forward_interval 1 --neuron.epoch_length 3
 ```
 
-Live run (later — requires a registered wallet/hotkey on a subnet):
+### Live run (against a chain)
+
+Requires a registered wallet/hotkey on a subnet. For a full local chain setup
+(start a local subtensor, create + **activate** the subnet, register, run both
+neurons), see **[docs/localnet.md](docs/localnet.md)**.
 
 ```bash
+# miner (advertise a non-loopback IP; the chain rejects 127.0.0.1)
+uv run python -m neurons.miner \
+  --netuid <id> --subtensor.network <net> \
+  --wallet.name miner --wallet.hotkey default \
+  --axon.ip 0.0.0.0 --axon.external_ip <HOST_IP> --axon.port 8191
+
+# validator
 uv run python -m neurons.validator \
   --netuid <id> --subtensor.network <net> \
-  --wallet.name <wallet> --wallet.hotkey <hotkey>
+  --wallet.name validator --wallet.hotkey default
 ```
 
-Layout:
+### Commit-reveal weights
+
+The validator detects `commit_reveal_weights_enabled` on startup and routes
+`set_weights` through the commit-reveal path automatically (bittensor v10 commit
+-reveal v4), tagging each commit with a `version_key` (`subnet.__spec_version__`)
+so a commit is matched to its later reveal. It also honors the subnet's
+`weights_rate_limit` (only commits once the required number of blocks has
+elapsed). A subnet must be **activated** (`subtensor.start_call`) before
+emissions flow — see the localnet guide.
+
+### Layout
 
 ```
-neurons/validator.py          # entry point: Validator(BaseValidatorNeuron)
+neurons/
+├── validator.py              # Validator(BaseValidatorNeuron)
+└── miner.py                  # Miner(BaseMinerNeuron) — NDVI-baseline prediction
 subnet/
 ├── protocol.py               # YieldPredictionSynapse (bt.Synapse)
 ├── mock.py                   # MockMetagraph (offline)
 ├── base/
 │   ├── neuron.py             # BaseNeuron: wallet/subtensor/metagraph (or mock)
-│   └── validator.py          # BaseValidatorNeuron: EMA scores, run loop, set_weights
+│   ├── validator.py          # EMA scores, run loop, commit-reveal set_weights
+│   └── miner.py              # BaseMinerNeuron: axon serve + blacklist/priority
 └── validator/
-    ├── config.py             # bittensor config + custom args
+    ├── config.py             # single-parse config flattened into bt.Config
     ├── challenge.py          # generates a task + hidden ground truth (mock)
-    └── forward.py            # query miners, score, update scores
+    └── forward.py            # query serving miners, score, update scores
 ```
 
 Scoring reuses `app/core/scoring.py` (`mean_absolute_error`, `rank_score`,
-`normalize_weights`); miners reuse `app/miners/mock.py`.
+`normalize_weights`); the offline path reuses `app/miners/mock.py`.
+`scripts/localnet_e2e.py` runs miner + validator together for a quick smoke test.
 
 ## Project structure
 
