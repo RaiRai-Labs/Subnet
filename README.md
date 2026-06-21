@@ -10,6 +10,48 @@ against real harvest outcomes (MAE → rank score → normalized consensus weigh
 Built with **FastAPI**, **Pydantic v2**, **SQLAlchemy (async)** and **PostgreSQL**,
 managed with **uv**.
 
+## Validator neuron
+
+The Bittensor validator neuron lives in `neurons/validator.py` (library code in
+`subnet/`). It runs a loop that poses a yield-prediction task, queries miners,
+scores them (MAE → rank score), keeps an EMA of per-miner scores, and sets
+normalized weights every `epoch_length` steps.
+
+Run it offline (mock metagraph + in-process mock miners — no wallet or chain):
+
+```bash
+uv run python -m neurons.validator --mock
+# faster demo:
+uv run python -m neurons.validator --mock --neuron.forward_interval 1 --neuron.epoch_length 3
+```
+
+Live run (later — requires a registered wallet/hotkey on a subnet):
+
+```bash
+uv run python -m neurons.validator \
+  --netuid <id> --subtensor.network <net> \
+  --wallet.name <wallet> --wallet.hotkey <hotkey>
+```
+
+Layout:
+
+```
+neurons/validator.py          # entry point: Validator(BaseValidatorNeuron)
+subnet/
+├── protocol.py               # YieldPredictionSynapse (bt.Synapse)
+├── mock.py                   # MockMetagraph (offline)
+├── base/
+│   ├── neuron.py             # BaseNeuron: wallet/subtensor/metagraph (or mock)
+│   └── validator.py          # BaseValidatorNeuron: EMA scores, run loop, set_weights
+└── validator/
+    ├── config.py             # bittensor config + custom args
+    ├── challenge.py          # generates a task + hidden ground truth (mock)
+    └── forward.py            # query miners, score, update scores
+```
+
+Scoring reuses `app/core/scoring.py` (`mean_absolute_error`, `rank_score`,
+`normalize_weights`); miners reuse `app/miners/mock.py`.
+
 ## Project structure
 
 ```
