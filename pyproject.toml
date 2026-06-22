@@ -1,0 +1,17 @@
+[project]
+name = "rairai-subnet"
+version = "0.1.0"
+description = "RaiRai-Labs Bittensor subnet validator API — agricultural yield prediction tasks & miner scoring"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "asyncpg>=0.31.0",
+    "bittensor>=10.4.1",
+    "fastapi>=0.137.0",
+    "loguru>=0.7.3",
+    "pydantic>=2.13.0",
+    "pydantic-settings>=2.14.0",
+    "python-dotenv>=1.2.0",
+    "sqlalchemy>=2.0.51",
+    "uvicorn[standard]>=0.49.0",
+]

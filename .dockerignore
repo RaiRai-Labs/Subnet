@@ -1,0 +1,15 @@
+.venv
+.git
+.env
+__pycache__/
+*.py[oc]
+*.egg-info
+build/
+dist/
+wheels/
+logs/
+*.log
+.dockerignore
+Dockerfile
+docker-compose.yml
+README.md

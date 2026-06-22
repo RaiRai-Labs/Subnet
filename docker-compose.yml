@@ -1,0 +1,52 @@
+services:
+  db:
+    image: postgres:18-alpine
+    container_name: rairai_subnet_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rairai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rairai}
+      POSTGRES_DB: ${POSTGRES_DB:-rairai_subnet}
+    ports:
+      # Host 5433 -> container 5432 (avoids clashing with a system Postgres on 5432).
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      # PG18 image stores data under /var/lib/postgresql (PGDATA=.../18/docker).
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rairai} -d ${POSTGRES_DB:-rairai_subnet}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:8-alpine
+    container_name: rairai_subnet_redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    container_name: rairai_subnet_api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-rairai}:${POSTGRES_PASSWORD:-rairai}@db:5432/${POSTGRES_DB:-rairai_subnet}
+      REDIS_URL: redis://redis:6379/0
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      DEBUG: ${DEBUG:-false}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:
