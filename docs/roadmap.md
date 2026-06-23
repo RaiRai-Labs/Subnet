@@ -9,7 +9,7 @@ subnet: build Bittensor neurons (`neurons/validator.py`, `neurons/miner.py`),
 and demote the existing FastAPI app to the **off-chain farmer/data backend**
 (spec §12) that feeds the validator.
 
-Legend: ⬜ todo · 🎯 deliverable · 📎 reference
+Legend: ⬜ todo · ✅ done · 🟡 partial · 🎯 deliverable · 📎 reference
 
 ---
 
@@ -76,11 +76,11 @@ Anti-gaming:
 - ✅ Liveness: N-strike absence handling (drop history after K consecutive no-shows). 📎 `subnet/validator/rank_history.py::RankTracker.mark_absent`
 
 Data pipeline:
-- ⬜ Satellite loader: Sentinel-2 NDVI/EVI/NDWI ingestion + caching (Google Earth Engine or Sentinel Hub). 📎 spec §4, `zeus/data/loaders/era5_base.py`
-- ⬜ Weather loader: Open-Meteo (temperature/rainfall/humidity/wind). 📎 `zeus/data/loaders/openmeteo.py`
-- ⬜ Feature builder: assemble validator challenge features from farm metadata + satellite + weather. 📎 `zeus/data/sample.py`, `converter.py`
-- ⬜ Ground-truth verification (spec §7): range check + satellite-consistency before a reported harvest counts as truth.
-- 🎯 Validators score against verified real-world yield data; copying is detected and penalized.
+- 🟡 Satellite loader: provider-agnostic `SatelliteLoader` interface + deterministic offline stub done; real Sentinel-2 provider (Sentinel Hub / GEE) pending credentials. 📎 `subnet/data/satellite.py`
+- ✅ Weather loader: Open-Meteo daily history (temperature/rainfall/wind), keyless. 📎 `subnet/data/weather.py`
+- ✅ Feature builder: assemble challenge features (`YieldPredictionSynapse`) from farm metadata + satellite + weather. 📎 `subnet/data/features.py`
+- ✅ Ground-truth verification (spec §7): range check + NDVI-consistency before a reported harvest counts as truth (wired into `POST /responses/ground-truth`). 📎 `subnet/data/ground_truth.py`
+- 🎯 Validators score against verified real-world yield data; copying is detected and penalized. *(Real satellite provider is the remaining gap.)*
 - 📎 `zeus/validator/collusion.py`, `zeus/data/loaders/*`, `zeus/data/{sample,converter}.py`
 
 ---
