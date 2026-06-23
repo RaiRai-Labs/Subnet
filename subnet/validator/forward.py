@@ -41,34 +41,42 @@ def forward(validator) -> None:
 
     predictions = query_miners(validator, challenge, uids)
 
-    # Step 1: separate responding miners from silent ones.
-    # Silent miners are skipped entirely — no penalty, no rank, no reward.
-    active_uids  = [u for u, p in zip(uids, predictions) if p is not None]
+    # Responding miners only; silent miners earn no reward/rank this round.
+    active_uids = [u for u, p in zip(uids, predictions) if p is not None]
     active_preds = [p for p in predictions if p is not None]
 
     rewards = [0.0] * len(uids)
-
+    ranks_by_uid: dict[int, float] = {}
     if active_uids:
-        # Step 2: compute dual-metric error only for miners who responded.
+        # Dual-metric error -> competition rank (ties averaged) -> winner-take-most.
         errors = [dual_metric_error(p, challenge.actual_yield) for p in active_preds]
-
-        # Step 3: rank responding miners competitively (ties averaged).
-        ranks = competition_rank(errors)
-
-        # Step 4: winner-take-most weights across responding miners only.
+        ranks = competition_rank(errors)  # rank 1 = lowest error = best
         active_rewards = winner_take_most(ranks)
-
-        # Map active rewards back to full uid list (silent miners stay 0.0).
         uid_to_reward = dict(zip(active_uids, active_rewards))
         rewards = [uid_to_reward.get(u, 0.0) for u in uids]
+        ranks_by_uid = dict(zip(active_uids, ranks))
 
     validator.update_scores(rewards, uids)
 
+    # Fold this round's competition ranks into the rolling per-challenge window,
+    # so standings reflect sustained per-challenge skill (Phase 3).
+    cid = challenge.challenge_id
+    validator.rank_tracker.record(cid, validator.step, ranks_by_uid)
+    validator.persist_round_ranks(
+        cid, validator.step, ranks_by_uid, dict(zip(uids, rewards))
+    )
+
+    rolling = validator.rank_tracker.rolling_ranks(cid)
+    best = validator.rank_tracker.best_miner(cid)
+
     bt.logging.info(
-        f"step {validator.step} | {challenge.synapse.crop} "
+        f"step {validator.step} | challenge {cid} (w={challenge.spec.weight}) "
         f"@ {challenge.synapse.province} | actual={challenge.actual_yield} | "
         + ", ".join(
-            f"uid{u}:{'skip' if p is None else f'pred={p}->w={rewards[i]:.3f}'}"
+            f"uid{u}:"
+            + ("skip" if p is None else f"pred={p}->w={rewards[i]:.3f}->rank{ranks_by_uid.get(u)}")
             for i, (u, p) in enumerate(zip(uids, predictions))
         )
+        + f" | best=uid{best} | rolling_ranks="
+        + "{" + ", ".join(f"{u}:{avg:.2f}" for u, avg in sorted(rolling.items())) + "}"
     )

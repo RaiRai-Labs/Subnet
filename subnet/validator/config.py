@@ -37,6 +37,18 @@ def add_args(parser: argparse.ArgumentParser) -> None:
         default=0.2,
         help="EMA weight for new rewards when updating miner scores.",
     )
+    parser.add_argument(
+        "--neuron.rank_window",
+        type=int,
+        default=10,
+        help="Rounds of per-challenge rank history to average for standings.",
+    )
+    parser.add_argument(
+        "--neuron.persist_ranks",
+        action="store_true",
+        default=False,
+        help="Persist rolling rank history to Postgres (requires DATABASE_URL).",
+    )
 
 
 def _flatten_into_config(namespace: argparse.Namespace) -> bt.Config:

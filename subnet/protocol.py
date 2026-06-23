@@ -15,6 +15,7 @@ class YieldPredictionSynapse(bt.Synapse):
     crop: str
     province: Optional[str] = None
     field_size: Optional[float] = None          # hectares
+    horizon_days: Optional[int] = None          # forecast horizon (days before harvest)
     ndvi: Optional[list[float]] = None          # historical NDVI series
     weather: Optional[list[dict]] = None        # historical weather series
 

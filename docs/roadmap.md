@@ -52,13 +52,13 @@ Replaces our current "POST a hash, we recompute and trust it" flow.
 Replace the toy `score = 1/(1+MAE)` with a real, gameable-resistant incentive
 curve and rolling performance history.
 
-- ⬜ Challenge taxonomy: model multiple challenges (e.g. crop × forecast-horizon) each with its own weight, instead of one undifferentiated task. 📎 `challenge_spec.py`, `constants.py::ERA5_DATA_VARS`/`TIME_WINDOW_WEIGHTS`
+- ✅ Challenge taxonomy: model multiple challenges (e.g. crop × forecast-horizon) each with its own weight, instead of one undifferentiated task. 📎 `subnet/validator/challenge_spec.py`
 - ⬜ Dual-metric scoring: `(RMSE + MAE)/2`; add region/importance weighting analog (e.g. weight key provinces). 📎 `metrics.py`, `reward.py::calculate_scores`
 - ⬜ Competition ranking with tie handling. 📎 `reward.py::calculate_competition_ranks`
-- ⬜ Rolling rank history: persist per-challenge ranks (use our **Postgres**, not SQLite), average last N rounds with recency tie-breaker. 📎 `results_state.py`, `reward.py::compute_avg_ranks`
+- ✅ Rolling rank history: persist per-challenge ranks (use our **Postgres**, not SQLite), average last N rounds with recency tie-breaker. 📎 `subnet/validator/rank_history.py`, `app/core/rank_history.py`
 - ⬜ Winner-take-most distribution: 95% to best + logarithmic remainder. 📎 `reward.py::calculate_challenge_weights`, `PERCENTAGE_GOING_TO_WINNER`
 - ⬜ Aggregate weights across challenges by effective weight. 📎 `weight_setter.py`
-- ⬜ New tables: `challenge`, `challenge_rank_history`, `best_miners` (extend existing `prediction_tasks`/`miner_responses`).
+- ✅ New tables: `challenge`, `challenge_rank_history`, `best_miners` (extend existing `prediction_tasks`/`miner_responses`). 📎 `app/models/challenge.py`
 - 🎯 Weights reflect sustained, multi-round, multi-challenge performance — not a single lucky prediction.
 - 📎 `zeus/validator/{reward,metrics,challenge_spec}.py`, `zeus/utils/results_state.py`
 
