@@ -30,20 +30,39 @@ def competition_rank(scores: dict[int, float]) -> dict[int, int]:
 
 
 class RankTracker:
-    """In-memory rolling rank history, keyed by challenge then miner uid."""
+    """In-memory rolling rank history, keyed by challenge then miner uid.
 
-    def __init__(self, window: int = 10) -> None:
+    Liveness (Phase 4): a miner that is queried but does not respond accrues an
+    absence strike for that challenge; after ``allowed_absence`` consecutive
+    no-shows its rank history is dropped, so stale standings don't linger and a
+    returning miner starts fresh. Responding resets the strike count.
+    """
+
+    def __init__(self, window: int = 10, allowed_absence: int = 3) -> None:
         self.window = window
+        self.allowed_absence = allowed_absence
         # challenge_id -> uid -> deque[(round, rank)] (most recent last)
         self._hist: dict[str, dict[int, deque]] = defaultdict(dict)
+        # challenge_id -> uid -> consecutive no-show count
+        self._absence: dict[str, dict[int, int]] = defaultdict(dict)
 
     def record(self, challenge_id: str, round_no: int, ranks: dict[int, int]) -> None:
-        """Append this round's per-miner ranks for a challenge."""
+        """Append this round's per-miner ranks; responding resets absence."""
         per_uid = self._hist[challenge_id]
         for uid, rank in ranks.items():
             if uid not in per_uid:
                 per_uid[uid] = deque(maxlen=self.window)
             per_uid[uid].append((round_no, rank))
+            self._absence[challenge_id][uid] = 0
+
+    def mark_absent(self, challenge_id: str, uids) -> None:
+        """Count no-shows; drop a miner's history after ``allowed_absence`` misses."""
+        strikes = self._absence[challenge_id]
+        for uid in uids:
+            strikes[uid] = strikes.get(uid, 0) + 1
+            if strikes[uid] >= self.allowed_absence:
+                self._hist[challenge_id].pop(uid, None)
+                strikes[uid] = 0
 
     def rolling_ranks(self, challenge_id: str) -> dict[int, float]:
         """Average rank per miner over the retained window for a challenge."""

@@ -70,10 +70,10 @@ Close the copying loophole that commit-reveal alone doesn't (Tier 3), and ingest
 real ground truth instead of trusting POSTed numbers (spec §4, §7).
 
 Anti-gaming:
-- ⬜ Collusion detection: pairwise score-similarity below threshold ⇒ penalize the newer-registered hotkey. 📎 `collusion.py`, `COLLUSION_PENALTY_THRESHOLD`
-- ⬜ Shape/sanity penalties: malformed or out-of-range predictions → worst rank. 📎 `reward.py::should_apply_shape_penalty`
-- ⬜ Miner axon `blacklist` (registered? validator permit? min stake?) and `priority` (by stake). 📎 `zeus/base/miner.py`
-- ⬜ Liveness: N-strike absence handling (drop history after K consecutive no-shows). 📎 `RANK_HISTORY_ALLOWED_ABSENCE`
+- ✅ Collusion detection: pairwise prediction-similarity below threshold ⇒ penalize the newer-registered hotkey. 📎 `subnet/validator/anti_gaming.py::CollusionDetector`
+- ✅ Shape/sanity penalties: malformed or out-of-range predictions → worst rank. 📎 `subnet/validator/anti_gaming.py::is_valid_prediction`
+- ✅ Miner axon `blacklist` (registered? validator permit? min stake?) and `priority` (by stake). 📎 `subnet/base/miner.py`
+- ✅ Liveness: N-strike absence handling (drop history after K consecutive no-shows). 📎 `subnet/validator/rank_history.py::RankTracker.mark_absent`
 
 Data pipeline:
 - ⬜ Satellite loader: Sentinel-2 NDVI/EVI/NDWI ingestion + caching (Google Earth Engine or Sentinel Hub). 📎 spec §4, `zeus/data/loaders/era5_base.py`

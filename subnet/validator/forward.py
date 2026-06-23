@@ -4,6 +4,7 @@ import bittensor as bt
 
 from app.core.scoring import competition_rank, dual_metric_error, winner_take_most
 from app.miners.mock import MOCK_MINERS
+from subnet.validator.anti_gaming import is_valid_prediction
 from subnet.validator.challenge import Challenge, generate_challenge
 
 
@@ -41,9 +42,26 @@ def forward(validator) -> None:
 
     predictions = query_miners(validator, challenge, uids)
 
-    # Responding miners only; silent miners earn no reward/rank this round.
-    active_uids = [u for u, p in zip(uids, predictions) if p is not None]
-    active_preds = [p for p in predictions if p is not None]
+    # Shape/sanity penalty (Phase 4): malformed or out-of-range predictions are
+    # treated as non-responses. Valid responders go on to collusion screening.
+    valid_uids: list[int] = []
+    valid_preds: list[float] = []
+    absent: list[int] = []
+    for uid, prediction in zip(uids, predictions):
+        if is_valid_prediction(prediction):
+            valid_uids.append(uid)
+            valid_preds.append(prediction)
+        else:
+            absent.append(uid)
+
+    # Collusion penalty (Phase 4): copy-cat prediction streams are excluded from
+    # scoring (the newer-registered hotkey of each pair forfeits the round).
+    validator.collusion_detector.record(validator.step, dict(zip(valid_uids, valid_preds)))
+    colluders = validator.collusion_detector.detect(validator.registration_order())
+
+    active_uids = [u for u in valid_uids if u not in colluders]
+    active_preds = [p for u, p in zip(valid_uids, valid_preds) if u not in colluders]
+    excluded = [u for u in uids if u not in active_uids]  # absent / invalid / colluding
 
     rewards = [0.0] * len(uids)
     ranks_by_uid: dict[int, float] = {}
@@ -58,10 +76,11 @@ def forward(validator) -> None:
 
     validator.update_scores(rewards, uids)
 
-    # Fold this round's competition ranks into the rolling per-challenge window,
-    # so standings reflect sustained per-challenge skill (Phase 3).
+    # Fold competition ranks into the rolling per-challenge window (Phase 3);
+    # excluded miners accrue absence strikes so liveness drops stale history.
     cid = challenge.challenge_id
     validator.rank_tracker.record(cid, validator.step, ranks_by_uid)
+    validator.rank_tracker.mark_absent(cid, excluded)
     validator.persist_round_ranks(
         cid, validator.step, ranks_by_uid, dict(zip(uids, rewards))
     )
@@ -69,14 +88,20 @@ def forward(validator) -> None:
     rolling = validator.rank_tracker.rolling_ranks(cid)
     best = validator.rank_tracker.best_miner(cid)
 
+    flags = ""
+    if colluders:
+        flags += f" | colluding={sorted(colluders)}"
+    if absent:
+        flags += f" | absent/invalid={absent}"
     bt.logging.info(
         f"step {validator.step} | challenge {cid} (w={challenge.spec.weight}) "
         f"@ {challenge.synapse.province} | actual={challenge.actual_yield} | "
         + ", ".join(
             f"uid{u}:"
-            + ("skip" if p is None else f"pred={p}->w={rewards[i]:.3f}->rank{ranks_by_uid.get(u)}")
+            + ("skip" if u in excluded else f"pred={p}->w={rewards[i]:.3f}->rank{ranks_by_uid.get(u)}")
             for i, (u, p) in enumerate(zip(uids, predictions))
         )
         + f" | best=uid{best} | rolling_ranks="
         + "{" + ", ".join(f"{u}:{avg:.2f}" for u, avg in sorted(rolling.items())) + "}"
+        + flags
     )

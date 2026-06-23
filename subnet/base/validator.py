@@ -10,6 +10,7 @@ import numpy as np
 from app.core.scoring import normalize_weights
 from subnet import __spec_version__
 from subnet.base.neuron import BaseNeuron
+from subnet.validator.anti_gaming import CollusionDetector
 from subnet.validator.rank_history import RankTracker
 
 
@@ -70,7 +71,14 @@ class BaseValidatorNeuron(BaseNeuron):
 
         # Rolling per-challenge rank history (in memory; optionally to Postgres).
         self.rank_window = int(getattr(self.config.neuron, "rank_window", 10) or 10)
-        self.rank_tracker = RankTracker(window=self.rank_window)
+        allowed_absence = int(getattr(self.config.neuron, "allowed_absence", 3) or 3)
+        self.rank_tracker = RankTracker(
+            window=self.rank_window, allowed_absence=allowed_absence
+        )
+        # Anti-gaming: flag miners with copy-cat prediction streams.
+        self.collusion_detector = CollusionDetector(
+            threshold=float(getattr(self.config.neuron, "collusion_threshold", 0.02))
+        )
         self.persist_ranks = bool(
             getattr(self.config.neuron, "persist_ranks", False)
         ) and not self.config.mock
@@ -84,6 +92,17 @@ class BaseValidatorNeuron(BaseNeuron):
     # --- to be implemented by subclasses ---
     def forward(self) -> None:
         raise NotImplementedError
+
+    def registration_order(self) -> dict[int, int]:
+        """uid → registration ordinal (higher == newer), for collusion penalties.
+
+        Uses on-chain ``block_at_registration`` when available; offline (mock)
+        falls back to uid, which increases with registration order.
+        """
+        blocks = getattr(self.metagraph, "block_at_registration", None)
+        if blocks is not None:
+            return {int(u): int(blocks[u]) for u in self.metagraph.uids}
+        return {int(u): int(u) for u in self.metagraph.uids}
 
     # --- scoring ---
     def update_scores(self, rewards: list[float], uids: list[int]) -> None:

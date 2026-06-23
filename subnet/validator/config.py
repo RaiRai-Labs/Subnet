@@ -49,6 +49,31 @@ def add_args(parser: argparse.ArgumentParser) -> None:
         default=False,
         help="Persist rolling rank history to Postgres (requires DATABASE_URL).",
     )
+    # --- Anti-gaming (Phase 4) ---
+    parser.add_argument(
+        "--neuron.allowed_absence",
+        type=int,
+        default=3,
+        help="Consecutive no-shows before a miner's rank history is dropped.",
+    )
+    parser.add_argument(
+        "--neuron.collusion_threshold",
+        type=float,
+        default=0.02,
+        help="Mean abs prediction diff at/below which two miners are deemed colluding.",
+    )
+    parser.add_argument(
+        "--blacklist.min_stake",
+        type=float,
+        default=0.0,
+        help="Miner: reject axon requests from hotkeys staking below this (TAO).",
+    )
+    parser.add_argument(
+        "--blacklist.validator_permit",
+        action="store_true",
+        default=False,
+        help="Miner: only serve requesters that hold a validator permit.",
+    )
 
 
 def _flatten_into_config(namespace: argparse.Namespace) -> bt.Config:
