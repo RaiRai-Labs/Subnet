@@ -19,8 +19,18 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import date
 
-TOKEN_URL = "https://services.sentinel-hub.com/oauth/token"
-STATS_URL = "https://services.sentinel-hub.com/api/v1/statistics"
+# Endpoints per deployment. "commercial" = sentinel-hub.com (trial/paid);
+# "cdse" = Copernicus Data Space Ecosystem (free, dataspace.copernicus.eu).
+DEPLOYMENTS = {
+    "commercial": {
+        "token": "https://services.sentinel-hub.com/oauth/token",
+        "stats": "https://services.sentinel-hub.com/api/v1/statistics",
+    },
+    "cdse": {
+        "token": "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token",
+        "stats": "https://sh.dataspace.copernicus.eu/api/v1/statistics",
+    },
+}
 
 # Reflectance is 0..1 in Sentinel Hub evalscripts for S2L2A, so the EVI +1
 # constant is correct as written. NDWI here is McFeeters (green/NIR).
@@ -53,8 +63,9 @@ class SentinelHubError(RuntimeError):
 class SentinelHubLoader:
     client_id: str | None = None
     client_secret: str | None = None
-    token_url: str = TOKEN_URL
-    stats_url: str = STATS_URL
+    deployment: str | None = None    # "commercial" | "cdse" (env SH_DEPLOYMENT)
+    token_url: str | None = None     # explicit override; else picked by deployment
+    stats_url: str | None = None
     collection: str = "sentinel-2-l2a"
     interval: str = "P5D"            # aggregation interval (S2 revisit ~5 days)
     buffer_deg: float = 0.005        # ~500 m half-box around the point
@@ -64,6 +75,13 @@ class SentinelHubLoader:
     def __post_init__(self) -> None:
         self.client_id = self.client_id or os.getenv("SH_CLIENT_ID")
         self.client_secret = self.client_secret or os.getenv("SH_CLIENT_SECRET")
+        deployment = (
+            self.deployment or os.getenv("SH_DEPLOYMENT") or "commercial"
+        ).lower()
+        endpoints = DEPLOYMENTS.get(deployment, DEPLOYMENTS["commercial"])
+        self.deployment = deployment
+        self.token_url = self.token_url or endpoints["token"]
+        self.stats_url = self.stats_url or endpoints["stats"]
 
     # --- offline-testable request/response helpers ---
     def _bbox(self, lat: float, lon: float) -> list[float]:
@@ -96,6 +114,8 @@ class SentinelHubLoader:
                 "resy": self.resolution_deg,
                 "evalscript": _EVALSCRIPT,
             },
+            # Empty default → mean/min/max/stDev per output band (we read mean).
+            "calculations": {"default": {}},
         }
 
     @staticmethod
