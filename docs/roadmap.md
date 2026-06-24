@@ -76,11 +76,11 @@ Anti-gaming:
 - ✅ Liveness: N-strike absence handling (drop history after K consecutive no-shows). 📎 `subnet/validator/rank_history.py::RankTracker.mark_absent`
 
 Data pipeline:
-- 🟡 Satellite loader: provider-agnostic `SatelliteLoader` interface + deterministic offline stub done; real Sentinel-2 provider (Sentinel Hub / GEE) pending credentials. 📎 `subnet/data/satellite.py`
+- ✅ Satellite loader: `SatelliteLoader` interface + offline stub + live **Sentinel Hub** provider (Statistical API → NDVI/EVI/NDWI); auto-selected when `SH_CLIENT_ID`/`SH_CLIENT_SECRET` are set, stub otherwise. 📎 `subnet/data/sentinelhub.py`, `subnet/data/satellite.py`
 - ✅ Weather loader: Open-Meteo daily history (temperature/rainfall/wind), keyless. 📎 `subnet/data/weather.py`
 - ✅ Feature builder: assemble challenge features (`YieldPredictionSynapse`) from farm metadata + satellite + weather. 📎 `subnet/data/features.py`
 - ✅ Ground-truth verification (spec §7): range check + NDVI-consistency before a reported harvest counts as truth (wired into `POST /responses/ground-truth`). 📎 `subnet/data/ground_truth.py`
-- 🎯 Validators score against verified real-world yield data; copying is detected and penalized. *(Real satellite provider is the remaining gap.)*
+- 🎯 Validators score against verified real-world yield data; copying is detected and penalized. *(Live Sentinel Hub provider implemented; supply `SH_CLIENT_*` creds to exercise it end-to-end.)*
 - 📎 `zeus/validator/collusion.py`, `zeus/data/loaders/*`, `zeus/data/{sample,converter}.py`
 
 ---

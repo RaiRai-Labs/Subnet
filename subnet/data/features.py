@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Optional
 
-from subnet.data.satellite import SatelliteLoader, StubSatelliteLoader
+from subnet.data.satellite import SatelliteLoader, default_satellite_loader
 from subnet.data.weather import WeatherLoader
 from subnet.protocol import YieldPredictionSynapse
 
@@ -35,7 +35,7 @@ class FeatureBuilder:
         satellite: Optional[SatelliteLoader] = None,
     ) -> None:
         self.weather = weather or WeatherLoader()
-        self.satellite = satellite or StubSatelliteLoader()
+        self.satellite = satellite or default_satellite_loader()
 
     def build(
         self, farm: FarmContext, start: date, end: date

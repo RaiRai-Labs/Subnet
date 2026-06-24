@@ -8,6 +8,7 @@ implements the same `indices()` contract and drops in once credentials exist.
 """
 
 import hashlib
+import os
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Protocol, runtime_checkable
@@ -47,3 +48,16 @@ class StubSatelliteLoader:
             )
             day += timedelta(days=self.step_days)
         return out
+
+
+def default_satellite_loader() -> SatelliteLoader:
+    """Real provider when credentials are present, else the offline stub.
+
+    Lets the pipeline auto-upgrade to Sentinel Hub once ``SH_CLIENT_ID`` /
+    ``SH_CLIENT_SECRET`` are set, with no code change.
+    """
+    if os.getenv("SH_CLIENT_ID") and os.getenv("SH_CLIENT_SECRET"):
+        from subnet.data.sentinelhub import SentinelHubLoader
+
+        return SentinelHubLoader()
+    return StubSatelliteLoader()
