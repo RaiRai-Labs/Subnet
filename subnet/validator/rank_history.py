@@ -10,23 +10,13 @@ ranked better in the most recent round wins (recency tie-break).
 
 This module is storage-agnostic and dependency-free — `RankTracker` keeps the
 window in memory, so it runs in offline ``--mock`` mode with no database. The
-matching Postgres persistence lives in ``app.core.rank_history``.
+matching Postgres persistence lives in ``app.core.rank_history``. Per-round
+ranks are produced by ``app.core.scoring.competition_rank`` (with tie handling);
+this module only accumulates them over the rolling window.
 """
 
 from collections import defaultdict, deque
 from typing import Optional
-
-
-def competition_rank(scores: dict[int, float]) -> dict[int, int]:
-    """Rank miner uids by score, highest score first → rank 1, 2, 3, ...
-
-    This is a minimal *ordinal* ranking. Proper shared-rank tie handling (e.g.
-    two miners tied for 1st both getting rank 1) is the separate "competition
-    ranking with tie handling" upgrade; here ties fall back to uid order purely
-    for determinism.
-    """
-    ordered = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
-    return {uid: position for position, (uid, _score) in enumerate(ordered, start=1)}
 
 
 class RankTracker:
