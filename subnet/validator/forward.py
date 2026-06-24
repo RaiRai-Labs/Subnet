@@ -2,7 +2,7 @@
 
 import bittensor as bt
 
-from app.core.scoring import mean_absolute_error, rank_score
+from app.core.scoring import competition_rank, dual_metric_error, winner_take_most
 from app.miners.mock import MOCK_MINERS
 from subnet.validator.challenge import Challenge, generate_challenge
 
@@ -41,13 +41,26 @@ def forward(validator) -> None:
 
     predictions = query_miners(validator, challenge, uids)
 
-    rewards: list[float] = []
-    for prediction in predictions:
-        if prediction is None:
-            rewards.append(0.0)
-            continue
-        mae = mean_absolute_error(prediction, challenge.actual_yield)
-        rewards.append(rank_score(mae))
+    # Step 1: separate responding miners from silent ones.
+    # Silent miners are skipped entirely — no penalty, no rank, no reward.
+    active_uids  = [u for u, p in zip(uids, predictions) if p is not None]
+    active_preds = [p for p in predictions if p is not None]
+
+    rewards = [0.0] * len(uids)
+
+    if active_uids:
+        # Step 2: compute dual-metric error only for miners who responded.
+        errors = [dual_metric_error(p, challenge.actual_yield) for p in active_preds]
+
+        # Step 3: rank responding miners competitively (ties averaged).
+        ranks = competition_rank(errors)
+
+        # Step 4: winner-take-most weights across responding miners only.
+        active_rewards = winner_take_most(ranks)
+
+        # Map active rewards back to full uid list (silent miners stay 0.0).
+        uid_to_reward = dict(zip(active_uids, active_rewards))
+        rewards = [uid_to_reward.get(u, 0.0) for u in uids]
 
     validator.update_scores(rewards, uids)
 
@@ -55,7 +68,7 @@ def forward(validator) -> None:
         f"step {validator.step} | {challenge.synapse.crop} "
         f"@ {challenge.synapse.province} | actual={challenge.actual_yield} | "
         + ", ".join(
-            f"uid{u}:pred={p}->r={r:.3f}"
-            for u, p, r in zip(uids, predictions, rewards)
+            f"uid{u}:{'skip' if p is None else f'pred={p}->w={rewards[i]:.3f}'}"
+            for i, (u, p) in enumerate(zip(uids, predictions))
         )
     )

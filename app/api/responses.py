@@ -9,9 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.scoring import (
     build_commit_hash,
+    competition_rank,
+    dual_metric_error,
     mean_absolute_error,
     normalize_weights,
-    rank_score,
+    winner_take_most,
 )
 from app.models.response import GroundTruth, MinerResponse
 from app.models.task import PredictionTask, TaskStatus
@@ -134,9 +136,10 @@ async def score_task(task_id: str, db: AsyncSession = Depends(get_db)):
 
     for r in responses:
         r.mae = mean_absolute_error(r.expected_yield, gt.actual_yield)
-        r.score = rank_score(r.mae)
+        r.score = dual_metric_error(r.expected_yield, gt.actual_yield)
 
-    weights = normalize_weights([r.score for r in responses])
+    ranks = competition_rank([r.score for r in responses])
+    weights = winner_take_most(ranks)
     for r, w in zip(responses, weights):
         r.weight = w
 
