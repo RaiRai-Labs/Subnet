@@ -12,7 +12,6 @@ from app.core.scoring import (
     competition_rank,
     dual_metric_error,
     mean_absolute_error,
-    normalize_weights,
     winner_take_most,
 )
 from app.models.response import GroundTruth, MinerResponse
@@ -35,6 +34,41 @@ async def _get_task(db: AsyncSession, task_id: str) -> PredictionTask:
     if not task:
         raise HTTPException(404, "task not found")
     return task
+
+
+async def _run_scoring(
+    db: AsyncSession, task: PredictionTask, gt: GroundTruth
+) -> list[MinerResponse]:
+    """Score all valid reveals for a task against its ground truth.
+
+    Returns the scored MinerResponse rows (empty list if no reveals yet).
+    Idempotent: safe to call even if task is already scored.
+    """
+    responses = list(
+        await db.scalars(
+            select(MinerResponse).where(
+                MinerResponse.task_id == task.id,
+                MinerResponse.revealed.is_(True),
+                MinerResponse.hash_valid.is_(True),
+            )
+        )
+    )
+    if not responses:
+        return []
+
+    for r in responses:
+        r.mae = mean_absolute_error(r.expected_yield, gt.actual_yield)
+        r.score = dual_metric_error(r.expected_yield, gt.actual_yield)
+
+    ranks = competition_rank([r.score for r in responses])
+    weights = winner_take_most(ranks)
+    for r, w in zip(responses, weights):
+        r.weight = w
+
+    task.status = TaskStatus.scored
+    task.scored_at = datetime.now(timezone.utc)
+    await db.commit()
+    return responses
 
 
 @router.post("/commit", response_model=MinerResponseOut, status_code=201)
@@ -99,6 +133,7 @@ async def submit_ground_truth(
     payload: GroundTruthRequest, db: AsyncSession = Depends(get_db)
 ):
     task = await _get_task(db, payload.task_id)
+    task_id_str = task.task_id  # cache before any commit may expire the ORM object
 
     # Verify the report (spec §7): range + NDVI-consistency against the task's
     # satellite features before it counts as truth.
@@ -113,19 +148,35 @@ async def submit_ground_truth(
     db.add(gt)
     await db.commit()
     await db.refresh(gt)
-    return {
+
+    # Cache response values now — _run_scoring does a second commit which
+    # expires the ORM objects, so we capture what we need beforehand.
+    response = {
         "id": gt.id,
-        "task_id": task.task_id,
+        "task_id": task_id_str,
         "actual_yield": gt.actual_yield,
         "verified": gt.verified,
         "reason": reason,
     }
 
+    # Auto-score immediately. No-op if miners haven't revealed yet — the
+    # manual POST /responses/score/{task_id} can retry once they do.
+    if verified:
+        await db.refresh(task)
+        await _run_scoring(db, task, gt)
+
+    return response
+
 
 @router.post("/score/{task_id}")
 async def score_task(task_id: str, db: AsyncSession = Depends(get_db)):
-    """Score all valid reveals for a task against its ground truth (spec §8–9)."""
+    """Score all valid reveals for a task against its ground truth (spec §8–9).
+
+    Called automatically by submit_ground_truth. This endpoint is the manual
+    retry path — use it when miners revealed after the farmer submitted yield.
+    """
     task = await _get_task(db, task_id)
+    task_id_str = task.task_id
 
     gt = await db.scalar(
         select(GroundTruth)
@@ -135,33 +186,12 @@ async def score_task(task_id: str, db: AsyncSession = Depends(get_db)):
     if not gt:
         raise HTTPException(409, "no ground truth submitted for this task")
 
-    responses = list(
-        await db.scalars(
-            select(MinerResponse).where(
-                MinerResponse.task_id == task.id,
-                MinerResponse.revealed.is_(True),
-                MinerResponse.hash_valid.is_(True),
-            )
-        )
-    )
+    responses = await _run_scoring(db, task, gt)
     if not responses:
         raise HTTPException(409, "no valid revealed responses to score")
 
-    for r in responses:
-        r.mae = mean_absolute_error(r.expected_yield, gt.actual_yield)
-        r.score = dual_metric_error(r.expected_yield, gt.actual_yield)
-
-    ranks = competition_rank([r.score for r in responses])
-    weights = winner_take_most(ranks)
-    for r, w in zip(responses, weights):
-        r.weight = w
-
-    task.status = TaskStatus.scored
-    task.scored_at = datetime.now(timezone.utc)
-    await db.commit()
-
     return {
-        "task_id": task.task_id,
+        "task_id": task_id_str,
         "actual_yield": gt.actual_yield,
         "scored": [
             {

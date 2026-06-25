@@ -25,6 +25,7 @@ class FarmContext:
     longitude: float
     province: Optional[str] = None
     field_size: Optional[float] = None      # hectares
+    planting_date: Optional[date] = None
     horizon_days: Optional[int] = None
 
 
@@ -49,7 +50,19 @@ class FeatureBuilder:
             crop=farm.crop,
             province=farm.province,
             field_size=farm.field_size,
+            planting_date=farm.planting_date.isoformat() if farm.planting_date else None,
             horizon_days=farm.horizon_days,
-            ndvi=[s["ndvi"] for s in sat],
-            weather=[{"temp": w["temp"], "rain": w["rain"]} for w in wx],
+            ndvi=[s["ndvi"] for s in sat if s.get("ndvi") is not None],
+            evi=[s["evi"] for s in sat if s.get("evi") is not None],
+            ndwi=[s["ndwi"] for s in sat if s.get("ndwi") is not None],
+            weather=[
+                {
+                    "date": w.get("date"),
+                    "temp": w.get("temp"),
+                    "rain": w.get("rain"),
+                    "humidity": w.get("humidity"),
+                    "wind": w.get("wind"),
+                }
+                for w in wx
+            ],
         )

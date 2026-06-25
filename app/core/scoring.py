@@ -86,16 +86,20 @@ def winner_take_most(
     winner_indices = [i for i, r in enumerate(ranks) if r == best_rank]
     loser_indices = [i for i, r in enumerate(ranks) if r != best_rank]
 
+    if not loser_indices:
+        # All miners tied — split the full pool equally.
+        per = 1.0 / len(winner_indices)
+        return [per] * n
+
     per_winner = winner_share / len(winner_indices)
     for i in winner_indices:
         weights[i] = per_winner
 
-    if loser_indices:
-        remainder = 1.0 - winner_share
-        inv_ranks = [1.0 / ranks[i] for i in loser_indices]
-        total_inv = sum(inv_ranks)
-        for i, inv in zip(loser_indices, inv_ranks):
-            weights[i] = remainder * (inv / total_inv)
+    remainder = 1.0 - winner_share
+    inv_ranks = [1.0 / ranks[i] for i in loser_indices]
+    total_inv = sum(inv_ranks)
+    for i, inv in zip(loser_indices, inv_ranks):
+        weights[i] = remainder * (inv / total_inv)
 
     return weights
 

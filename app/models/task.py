@@ -39,11 +39,15 @@ class PredictionTask(Base):
 
     crop = Column(String, nullable=False)
     province = Column(String, nullable=True)
-    field_size = Column(Float, nullable=True)   # hectares
+    field_size = Column(Float, nullable=True)     # hectares
+    planting_date = Column(String, nullable=True) # ISO date string, snapshot at challenge time
+    horizon_days = Column(Integer, nullable=True) # forecast horizon sent to miners
 
-    # Feature payload sent to miners.
-    ndvi = Column(JSON)        # historical NDVI series
-    weather = Column(JSON)     # historical weather series
+    # Feature payload sent to miners — full snapshot so the challenge is reproducible.
+    ndvi = Column(JSON, nullable=True)    # NDVI time series
+    evi = Column(JSON, nullable=True)     # EVI time series
+    ndwi = Column(JSON, nullable=True)    # NDWI (moisture) time series
+    weather = Column(JSON, nullable=True) # daily weather records
 
     status = Column(
         Enum(TaskStatus, name="task_status"),

@@ -29,6 +29,7 @@ class WeatherLoader:
         default_factory=lambda: (
             "temperature_2m_mean",
             "precipitation_sum",
+            "relative_humidity_2m_mean",
             "wind_speed_10m_max",
         )
     )
@@ -58,6 +59,7 @@ class WeatherLoader:
                     "date": day,
                     "temp": _at(daily.get("temperature_2m_mean"), i),
                     "rain": _at(daily.get("precipitation_sum"), i),
+                    "humidity": _at(daily.get("relative_humidity_2m_mean"), i),
                     "wind": _at(daily.get("wind_speed_10m_max"), i),
                 }
             )

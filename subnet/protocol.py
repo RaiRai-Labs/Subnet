@@ -15,9 +15,16 @@ class YieldPredictionSynapse(bt.Synapse):
     crop: str
     province: Optional[str] = None
     field_size: Optional[float] = None          # hectares
+    planting_date: Optional[str] = None         # ISO date, e.g. "2026-01-15"
     horizon_days: Optional[int] = None          # forecast horizon (days before harvest)
-    ndvi: Optional[list[float]] = None          # historical NDVI series
-    weather: Optional[list[dict]] = None        # historical weather series
+
+    # Satellite indices — historical series, one entry per scene
+    ndvi: Optional[list[float]] = None          # Normalized Difference Vegetation Index
+    evi: Optional[list[float]] = None           # Enhanced Vegetation Index
+    ndwi: Optional[list[float]] = None          # Normalized Difference Water Index
+
+    # Weather — daily records: {date, temp, rain, humidity, wind}
+    weather: Optional[list[dict]] = None
 
     # --- Response (filled by the miner) ---
     expected_yield: Optional[float] = None       # tons / hectare

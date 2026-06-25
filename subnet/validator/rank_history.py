@@ -45,14 +45,20 @@ class RankTracker:
             per_uid[uid].append((round_no, rank))
             self._absence[challenge_id][uid] = 0
 
-    def mark_absent(self, challenge_id: str, uids) -> None:
-        """Count no-shows; drop a miner's history after ``allowed_absence`` misses."""
+    def mark_absent(self, challenge_id: str, uids) -> set[int]:
+        """Count no-shows; drop a miner's history after ``allowed_absence`` misses.
+
+        Returns the set of uids whose history was dropped this call.
+        """
         strikes = self._absence[challenge_id]
+        dropped: set[int] = set()
         for uid in uids:
             strikes[uid] = strikes.get(uid, 0) + 1
             if strikes[uid] >= self.allowed_absence:
                 self._hist[challenge_id].pop(uid, None)
                 strikes[uid] = 0
+                dropped.add(uid)
+        return dropped
 
     def rolling_ranks(self, challenge_id: str) -> dict[int, float]:
         """Average rank per miner over the retained window for a challenge."""
