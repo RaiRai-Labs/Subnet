@@ -5,6 +5,7 @@ before ``create_all`` runs at startup.
 """
 
 from app.core.database import Base
+from app.models.challenge import BestMiner, Challenge, ChallengeRankHistory
 from app.models.farm import Farm, FarmUserLink
 from app.models.farm_analysis import FarmAnalysis
 from app.models.response import GroundTruth, MinerResponse
@@ -19,4 +20,7 @@ __all__ = [
     "TaskStatus",
     "MinerResponse",
     "GroundTruth",
+    "Challenge",
+    "ChallengeRankHistory",
+    "BestMiner",
 ]

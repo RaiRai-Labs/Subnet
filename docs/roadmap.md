@@ -9,7 +9,7 @@ subnet: build Bittensor neurons (`neurons/validator.py`, `neurons/miner.py`),
 and demote the existing FastAPI app to the **off-chain farmer/data backend**
 (spec §12) that feeds the validator.
 
-Legend: ⬜ todo · 🎯 deliverable · 📎 reference
+Legend: ⬜ todo · ✅ done · 🟡 partial · 🎯 deliverable · 📎 reference
 
 ---
 
@@ -52,13 +52,13 @@ Replaces our current "POST a hash, we recompute and trust it" flow.
 Replace the toy `score = 1/(1+MAE)` with a real, gameable-resistant incentive
 curve and rolling performance history.
 
-- ⬜ Challenge taxonomy: model multiple challenges (e.g. crop × forecast-horizon) each with its own weight, instead of one undifferentiated task. 📎 `challenge_spec.py`, `constants.py::ERA5_DATA_VARS`/`TIME_WINDOW_WEIGHTS`
+- ✅ Challenge taxonomy: model multiple challenges (e.g. crop × forecast-horizon) each with its own weight, instead of one undifferentiated task. 📎 `subnet/validator/challenge_spec.py`
 - ⬜ Dual-metric scoring: `(RMSE + MAE)/2`; add region/importance weighting analog (e.g. weight key provinces). 📎 `metrics.py`, `reward.py::calculate_scores`
 - ⬜ Competition ranking with tie handling. 📎 `reward.py::calculate_competition_ranks`
-- ⬜ Rolling rank history: persist per-challenge ranks (use our **Postgres**, not SQLite), average last N rounds with recency tie-breaker. 📎 `results_state.py`, `reward.py::compute_avg_ranks`
+- ✅ Rolling rank history: persist per-challenge ranks (use our **Postgres**, not SQLite), average last N rounds with recency tie-breaker. 📎 `subnet/validator/rank_history.py`, `app/core/rank_history.py`
 - ⬜ Winner-take-most distribution: 95% to best + logarithmic remainder. 📎 `reward.py::calculate_challenge_weights`, `PERCENTAGE_GOING_TO_WINNER`
 - ⬜ Aggregate weights across challenges by effective weight. 📎 `weight_setter.py`
-- ⬜ New tables: `challenge`, `challenge_rank_history`, `best_miners` (extend existing `prediction_tasks`/`miner_responses`).
+- ✅ New tables: `challenge`, `challenge_rank_history`, `best_miners` (extend existing `prediction_tasks`/`miner_responses`). 📎 `app/models/challenge.py`
 - 🎯 Weights reflect sustained, multi-round, multi-challenge performance — not a single lucky prediction.
 - 📎 `zeus/validator/{reward,metrics,challenge_spec}.py`, `zeus/utils/results_state.py`
 
@@ -70,17 +70,17 @@ Close the copying loophole that commit-reveal alone doesn't (Tier 3), and ingest
 real ground truth instead of trusting POSTed numbers (spec §4, §7).
 
 Anti-gaming:
-- ⬜ Collusion detection: pairwise score-similarity below threshold ⇒ penalize the newer-registered hotkey. 📎 `collusion.py`, `COLLUSION_PENALTY_THRESHOLD`
-- ⬜ Shape/sanity penalties: malformed or out-of-range predictions → worst rank. 📎 `reward.py::should_apply_shape_penalty`
-- ⬜ Miner axon `blacklist` (registered? validator permit? min stake?) and `priority` (by stake). 📎 `zeus/base/miner.py`
-- ⬜ Liveness: N-strike absence handling (drop history after K consecutive no-shows). 📎 `RANK_HISTORY_ALLOWED_ABSENCE`
+- ✅ Collusion detection: pairwise prediction-similarity below threshold ⇒ penalize the newer-registered hotkey. 📎 `subnet/validator/anti_gaming.py::CollusionDetector`
+- ✅ Shape/sanity penalties: malformed or out-of-range predictions → worst rank. 📎 `subnet/validator/anti_gaming.py::is_valid_prediction`
+- ✅ Miner axon `blacklist` (registered? validator permit? min stake?) and `priority` (by stake). 📎 `subnet/base/miner.py`
+- ✅ Liveness: N-strike absence handling (drop history after K consecutive no-shows). 📎 `subnet/validator/rank_history.py::RankTracker.mark_absent`
 
 Data pipeline:
-- ⬜ Satellite loader: Sentinel-2 NDVI/EVI/NDWI ingestion + caching (Google Earth Engine or Sentinel Hub). 📎 spec §4, `zeus/data/loaders/era5_base.py`
-- ⬜ Weather loader: Open-Meteo (temperature/rainfall/humidity/wind). 📎 `zeus/data/loaders/openmeteo.py`
-- ⬜ Feature builder: assemble validator challenge features from farm metadata + satellite + weather. 📎 `zeus/data/sample.py`, `converter.py`
-- ⬜ Ground-truth verification (spec §7): range check + satellite-consistency before a reported harvest counts as truth.
-- 🎯 Validators score against verified real-world yield data; copying is detected and penalized.
+- ✅ Satellite loader: `SatelliteLoader` interface + offline stub + live **Sentinel Hub** provider (Statistical API → NDVI/EVI/NDWI); auto-selected when `SH_CLIENT_ID`/`SH_CLIENT_SECRET` are set, stub otherwise. 📎 `subnet/data/sentinelhub.py`, `subnet/data/satellite.py`
+- ✅ Weather loader: Open-Meteo daily history (temperature/rainfall/wind), keyless. 📎 `subnet/data/weather.py`
+- ✅ Feature builder: assemble challenge features (`YieldPredictionSynapse`) from farm metadata + satellite + weather. 📎 `subnet/data/features.py`
+- ✅ Ground-truth verification (spec §7): range check + NDVI-consistency before a reported harvest counts as truth (wired into `POST /responses/ground-truth`). 📎 `subnet/data/ground_truth.py`
+- 🎯 Validators score against verified real-world yield data; copying is detected and penalized. *(Live Sentinel Hub provider implemented; supply `SH_CLIENT_*` creds to exercise it end-to-end.)*
 - 📎 `zeus/validator/collusion.py`, `zeus/data/loaders/*`, `zeus/data/{sample,converter}.py`
 
 ---

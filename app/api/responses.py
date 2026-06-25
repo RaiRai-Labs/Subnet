@@ -23,6 +23,7 @@ from app.schemas.response import (
     MinerResponseOut,
     RevealRequest,
 )
+from subnet.data.ground_truth import verify_ground_truth
 
 router = APIRouter(prefix="/responses", tags=["responses"])
 
@@ -98,15 +99,27 @@ async def submit_ground_truth(
     payload: GroundTruthRequest, db: AsyncSession = Depends(get_db)
 ):
     task = await _get_task(db, payload.task_id)
+
+    # Verify the report (spec §7): range + NDVI-consistency against the task's
+    # satellite features before it counts as truth.
+    verified, reason = verify_ground_truth(payload.actual_yield, task.ndvi)
+
     gt = GroundTruth(
         task_id=task.id,
         farm_id=payload.farm_id or task.farm_id,
         actual_yield=payload.actual_yield,
+        verified=verified,
     )
     db.add(gt)
     await db.commit()
     await db.refresh(gt)
-    return {"id": gt.id, "task_id": task.task_id, "actual_yield": gt.actual_yield}
+    return {
+        "id": gt.id,
+        "task_id": task.task_id,
+        "actual_yield": gt.actual_yield,
+        "verified": gt.verified,
+        "reason": reason,
+    }
 
 
 @router.post("/score/{task_id}")
