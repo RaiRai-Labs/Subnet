@@ -23,7 +23,28 @@ git clone <repo> && cd rairai_subnet
 cp .env.example .env            # optional: RAIRAI_* observability vars
 ```
 
-## 3. Start under PM2
+## 3. Preflight (validate before launch)
+
+Confirm wallet, axon IP/port, and creds are sane before you register/start:
+
+```bash
+uv run python scripts/preflight.py --role miner
+```
+
+It **errors** if `AXON_EXTERNAL_IP` is unset or a loopback address — the #1
+reason miners get no queries.
+
+## 4. Start under PM2
+
+Set the launch keys in `.env` (`NETUID`, `WALLET_*`, `AXON_PORT`,
+`AXON_EXTERNAL_IP`, `UPDATER_PM2_NAME=rairai-miner`), then bring up the miner and
+its auto-updater together:
+
+```bash
+pm2 start ecosystem.config.js --only rairai-miner,rairai-updater
+```
+
+Or use the script directly:
 
 ```bash
 NETUID=1 SUBTENSOR_NETWORK=finney WALLET_NAME=miner WALLET_HOTKEY=default \
@@ -38,7 +59,10 @@ pm2 startup    # run the command it prints
 pm2 save
 ```
 
-## 4. Keep it up to date
+## 5. Keep it up to date
+
+The ecosystem bring-up already runs `rairai-updater` (set
+`UPDATER_PM2_NAME=rairai-miner` in `.env`). Standalone equivalent:
 
 ```bash
 pm2 start scripts/run_neuron.py --name rairai-updater --interpreter python3 \
@@ -46,12 +70,16 @@ pm2 start scripts/run_neuron.py --name rairai-updater --interpreter python3 \
 pm2 save
 ```
 
-## 5. Observe
+## 6. Observe
 
 ```bash
 pm2 status
 pm2 logs rairai-miner            # look for "Predicted <yield> for <crop>"
 cat "$RAIRAI_HEARTBEAT_FILE"      # {role, uid, step, ts}
+
+# auto-alert if the miner heartbeat goes stale (cron, every minute):
+* * * * * cd /opt/rairai_subnet && RAIRAI_HEARTBEAT_FILE=/var/run/rairai/miner.json \
+  RAIRAI_ALERT_WEBHOOK=https://... python3 scripts/healthcheck.py --max-age 90
 ```
 
 ## 6. Verify you're being served

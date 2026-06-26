@@ -33,13 +33,31 @@ The start scripts load `.env` into the neuron's environment. Set:
 - `SH_DEPLOYMENT` / `SH_CLIENT_ID` / `SH_CLIENT_SECRET` — optional, to pull live
   Sentinel-2 satellite indices instead of the offline stub.
 
-## 4. Start under PM2
+## 4. Preflight (validate before launch)
+
+Catch missing wallet, bad `DATABASE_URL`, mis-set creds, etc. *before* starting:
+
+```bash
+uv run python scripts/preflight.py --role validator
+```
+
+It exits non-zero on any hard error. Fix those, then start.
+
+## 5. Start under PM2
+
+Single-command bring-up via the ecosystem file (reads `.env`) — starts the
+validator **and** the auto-updater together:
+
+```bash
+pm2 start ecosystem.config.js --only rairai-validator,rairai-updater
+```
+
+Or use the script (env- or flag-driven):
 
 ```bash
 NETUID=1 SUBTENSOR_NETWORK=finney WALLET_NAME=validator WALLET_HOTKEY=default \
   ./scripts/start_validator.sh
-
-# or pass flags through directly:
+# or pass flags straight through:
 ./scripts/start_validator.sh --netuid 1 --subtensor.network finney \
   --wallet.name validator --wallet.hotkey default
 ```
@@ -56,9 +74,10 @@ Useful knobs (passed through to the neuron):
 `--neuron.forward_interval`, `--neuron.epoch_length`, `--neuron.rank_window`,
 `--neuron.persist_ranks`, `--logging.logging_dir <dir> --logging.record_log`.
 
-## 5. Keep it up to date (auto-update / self-heal)
+## 6. Keep it up to date (auto-update / self-heal)
 
-Run the updater so the box pulls new commits, reinstalls, and restarts itself:
+If you started with the ecosystem file above, the `rairai-updater` app is
+already running. To run it standalone (e.g. with the start script):
 
 ```bash
 pm2 start scripts/run_neuron.py --name rairai-updater --interpreter python3 \
@@ -68,7 +87,7 @@ pm2 save
 
 > It hard-resets to `origin/<branch>` on update — keep local edits elsewhere.
 
-## 6. Observe
+## 7. Observe
 
 ```bash
 pm2 status                       # process health
@@ -76,10 +95,18 @@ pm2 logs rairai-validator        # live logs
 cat "$RAIRAI_HEARTBEAT_FILE"      # {role, uid, step, scores, ts}
 ```
 
-A stale `ts` in the heartbeat file means the neuron hung or died — alert on it.
+A stale `ts` in the heartbeat file means the neuron hung or died. Wire the
+heartbeat monitor into cron to get alerted automatically:
+
+```bash
+# every minute; alerts RAIRAI_ALERT_WEBHOOK if the last beat is > 90s old
+* * * * * cd /opt/rairai_subnet && RAIRAI_HEARTBEAT_FILE=/var/run/rairai/validator.json \
+  RAIRAI_ALERT_WEBHOOK=https://... python3 scripts/healthcheck.py --max-age 90
+```
+
 Start/crash events are also pushed to `RAIRAI_ALERT_WEBHOOK` when set.
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 | Symptom | Likely cause / fix |
 |---|---|

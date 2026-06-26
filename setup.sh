@@ -31,6 +31,15 @@ if ! command -v pm2 >/dev/null 2>&1; then
   sudo npm install -g pm2
 fi
 
+# pm2-logrotate keeps neuron logs from filling a small VPS disk (caps + rotates).
+if ! pm2 list >/dev/null 2>&1 || ! pm2 describe pm2-logrotate >/dev/null 2>&1; then
+  log "Installing pm2-logrotate (10MB cap, keep 7, daily rotate)..."
+  pm2 install pm2-logrotate >/dev/null 2>&1 || log "pm2-logrotate install skipped (non-fatal)."
+  pm2 set pm2-logrotate:max_size 10M >/dev/null 2>&1 || true
+  pm2 set pm2-logrotate:retain 7 >/dev/null 2>&1 || true
+  pm2 set pm2-logrotate:rotateInterval '0 0 * * *' >/dev/null 2>&1 || true
+fi
+
 # --- uv (Python package/runtime manager) ---
 if ! command -v uv >/dev/null 2>&1; then
   log "Installing uv..."
@@ -53,7 +62,17 @@ SYSCTL
   sudo sysctl --load=/etc/sysctl.d/99-rairai.conf || log "sysctl reload skipped (non-fatal)."
 fi
 
+# --- Firewall: open the miner axon port (opt in with RAIRAI_OPEN_FIREWALL=1) ---
+# Miners must be reachable from the chain; a UFW-default VPS blocks the axon port.
+if [[ "${RAIRAI_OPEN_FIREWALL:-0}" == "1" ]] && command -v ufw >/dev/null 2>&1; then
+  PORT="${AXON_PORT:-8091}"
+  log "Opening axon port ${PORT}/tcp in UFW..."
+  sudo ufw allow "${PORT}/tcp" || log "ufw rule skipped (non-fatal)."
+fi
+
 log "Done. Next:"
-log "  1) cp .env.example .env   # then edit (DATABASE_URL, SH_* if using satellite)"
-log "  2) ./scripts/start_validator.sh   OR   ./scripts/start_miner.sh"
-log "  3) pm2 startup && pm2 save   # to resurrect neurons on reboot"
+log "  1) cp .env.example .env   # then edit (NETUID, WALLET_*, DATABASE_URL, SH_*)"
+log "  2) uv run python scripts/preflight.py --role validator   # validate config"
+log "  3) pm2 start ecosystem.config.js --only rairai-validator,rairai-updater"
+log "     (or ./scripts/start_validator.sh / start_miner.sh)"
+log "  4) pm2 startup && pm2 save   # resurrect neurons on reboot"
