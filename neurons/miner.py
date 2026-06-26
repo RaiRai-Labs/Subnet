@@ -7,11 +7,13 @@ Live run against a local chain:
         --axon.ip 127.0.0.1 --axon.external_ip 127.0.0.1 --axon.port 8191
 """
 
+import os
 import time
 
 import bittensor as bt
 
 from subnet.base.miner import BaseMinerNeuron
+from subnet.observability import Alerter, configure_logging, write_heartbeat
 from subnet.protocol import YieldPredictionSynapse
 
 
@@ -30,10 +32,22 @@ class Miner(BaseMinerNeuron):
 
 
 def main() -> None:
+    configure_logging()
+    alerter = Alerter()
+    heartbeat = os.getenv("RAIRAI_HEARTBEAT_FILE")
     with Miner() as miner:
-        while not miner.should_exit:
-            bt.logging.info(f"Miner alive | uid {miner.uid} | step {miner.step}")
-            time.sleep(15)
+        alerter.send(f"miner started (uid {miner.uid})")
+        try:
+            while not miner.should_exit:
+                bt.logging.info(f"Miner alive | uid {miner.uid} | step {miner.step}")
+                if heartbeat:
+                    write_heartbeat(
+                        heartbeat, role="miner", uid=miner.uid, step=miner.step
+                    )
+                time.sleep(15)
+        except Exception as exc:  # noqa: BLE001 - surface fatal errors as an alert
+            alerter.send(f"miner stopped: {exc}", level="error")
+            raise
 
 
 if __name__ == "__main__":

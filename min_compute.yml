@@ -1,0 +1,52 @@
+# RaiRai Subnet — minimum & recommended compute for running neurons.
+#
+# Advisory baselines. Real requirements scale with metagraph size, query volume,
+# and (for validators) how much rank/challenge history Postgres retains.
+
+version: "0.1.0"
+
+validator:
+  minimum:
+    cpu:
+      cores: 4
+      arch: x86_64
+    ram_gb: 8
+    storage_gb: 50            # OS + Postgres (rank/challenge history)
+    storage_type: SSD
+    network_mbps: 100
+    python: ">=3.13"
+    os: "Ubuntu 22.04+"
+  recommended:
+    cpu:
+      cores: 8
+    ram_gb: 16
+    storage_gb: 100
+    storage_type: NVMe SSD
+    network_mbps: 1000
+
+miner:
+  minimum:
+    cpu:
+      cores: 2
+      arch: x86_64
+    ram_gb: 4
+    storage_gb: 20
+    storage_type: SSD
+    network_mbps: 100
+    python: ">=3.13"
+    os: "Ubuntu 22.04+"
+    network_notes: "Public, reachable axon port — the chain rejects 127.0.0.1."
+  recommended:
+    cpu:
+      cores: 4
+    ram_gb: 8
+    storage_gb: 40
+    network_mbps: 500
+
+dependencies:
+  process_manager: "PM2 (Node.js LTS)"
+  package_manager: "uv"
+  external_services:
+    - "Subtensor RPC endpoint (local or public)"
+    - "Open-Meteo — weather, keyless (validator)"
+    - "Sentinel Hub / CDSE — satellite, OAuth client (validator, optional)"
