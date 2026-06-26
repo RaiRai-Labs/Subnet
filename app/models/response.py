@@ -70,7 +70,7 @@ class GroundTruth(Base):
         nullable=False,
         index=True,
     )
-    farm_id = Column(Integer, ForeignKey("farms.id", ondelete="SET NULL"), index=True)
+    farm_id = Column(Integer, index=True)  # backend farm ID — subnet has no farms table
 
     actual_yield = Column(Float, nullable=False)     # tons / hectare
     verified = Column(Boolean, nullable=False, default=False)

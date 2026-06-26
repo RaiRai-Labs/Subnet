@@ -12,7 +12,6 @@ from sqlalchemy import (
     DateTime,
     Enum,
     Float,
-    ForeignKey,
     Integer,
     String,
 )
@@ -26,6 +25,7 @@ class TaskStatus(str, enum.Enum):
     closed = "closed"        # no longer accepting responses (reveal phase)
     completed = "completed"  # miners queried, predictions aggregated
     scored = "scored"        # ground truth received and miners scored
+    cancelled = "cancelled"  # farmer started a new season — stale tasks discarded
 
 
 class PredictionTask(Base):
@@ -35,7 +35,7 @@ class PredictionTask(Base):
     # Human/network-facing task id, e.g. "task_001".
     task_id = Column(String, unique=True, nullable=False, index=True)
 
-    farm_id = Column(Integer, ForeignKey("farms.id", ondelete="SET NULL"), index=True)
+    farm_id = Column(Integer, index=True)  # backend farm ID — subnet has no farms table
 
     crop = Column(String, nullable=False)
     province = Column(String, nullable=True)

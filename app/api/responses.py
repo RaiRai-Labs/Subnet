@@ -42,8 +42,11 @@ async def _run_scoring(
     """Score all valid reveals for a task against its ground truth.
 
     Returns the scored MinerResponse rows (empty list if no reveals yet).
-    Idempotent: safe to call even if task is already scored.
+    Once a task is scored it is locked — calling this again is a no-op.
     """
+    if task.status == TaskStatus.scored:
+        return []
+
     responses = list(
         await db.scalars(
             select(MinerResponse).where(
@@ -135,6 +138,17 @@ async def submit_ground_truth(
     task = await _get_task(db, payload.task_id)
     task_id_str = task.task_id  # cache before any commit may expire the ORM object
 
+    # Once a task is scored it is locked forever. The farmer already submitted a
+    # verified yield for this season and miners were scored against it. A second
+    # submission cannot change those scores — this prevents a farmer from
+    # cherry-picking a yield value that benefits a specific miner.
+    if task.status == TaskStatus.scored:
+        raise HTTPException(
+            409,
+            f"Task {task_id_str} is already scored and locked. "
+            "Harvest yield for this season cannot be changed after scoring.",
+        )
+
     # Verify the report (spec §7): range + NDVI-consistency against the task's
     # satellite features before it counts as truth.
     verified, reason = verify_ground_truth(payload.actual_yield, task.ndvi)
@@ -174,6 +188,7 @@ async def score_task(task_id: str, db: AsyncSession = Depends(get_db)):
 
     Called automatically by submit_ground_truth. This endpoint is the manual
     retry path — use it when miners revealed after the farmer submitted yield.
+    If the task is already scored, returns the existing scores without re-running.
     """
     task = await _get_task(db, task_id)
     task_id_str = task.task_id
@@ -186,13 +201,40 @@ async def score_task(task_id: str, db: AsyncSession = Depends(get_db)):
     if not gt:
         raise HTTPException(409, "no ground truth submitted for this task")
 
+    # If already scored, return the existing results — do not re-score.
+    if task.status == TaskStatus.scored:
+        existing = list(
+            await db.scalars(
+                select(MinerResponse).where(
+                    MinerResponse.task_id == task.id,
+                    MinerResponse.weight.isnot(None),
+                )
+            )
+        )
+        return {
+            "task_id": task_id_str,
+            "actual_yield": gt.actual_yield,
+            "already_scored": True,
+            "scored": [
+                {
+                    "miner_hotkey": r.miner_hotkey,
+                    "expected_yield": r.expected_yield,
+                    "mae": r.mae,
+                    "score": r.score,
+                    "weight": r.weight,
+                }
+                for r in existing
+            ],
+        }
+
     responses = await _run_scoring(db, task, gt)
     if not responses:
-        raise HTTPException(409, "no valid revealed responses to score")
+        raise HTTPException(409, "no valid revealed responses to score yet")
 
     return {
         "task_id": task_id_str,
         "actual_yield": gt.actual_yield,
+        "already_scored": False,
         "scored": [
             {
                 "miner_hotkey": r.miner_hotkey,

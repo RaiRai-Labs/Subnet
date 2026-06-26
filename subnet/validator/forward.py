@@ -117,6 +117,25 @@ def query_miners(validator, challenge: Challenge, uids: list[int]) -> list[float
 
 
 def forward(validator) -> None:
+    # Log the data-source mode once on the first forward pass so operators can
+    # immediately see whether the validator is using real farm data or synthetic
+    # fallback data. BACKEND_URL missing means the scoring pipeline is broken.
+    if validator.step == 0:
+        live_mode_check = not validator.config.mock
+        if not live_mode_check:
+            bt.logging.info("[challenge] MOCK mode — synthetic challenges, no chain")
+        elif _BACKEND_URL:
+            bt.logging.info(
+                f"[challenge] LIVE mode — fetching real farm data from {_BACKEND_URL}"
+            )
+        else:
+            bt.logging.warning(
+                "[challenge] LIVE mode but BACKEND_URL is not set — "
+                "falling back to SYNTHETIC challenges. "
+                "No real farm data will be used and the scoring pipeline is broken. "
+                "Set BACKEND_URL in your .env to fix this."
+            )
+
     uids = get_query_uids(validator)
 
     if not uids:

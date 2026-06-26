@@ -1,6 +1,7 @@
 """Pydantic schemas for prediction tasks."""
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -14,7 +15,11 @@ class TaskCreate(BaseModel):
     crop: str = Field(..., min_length=1, max_length=80, examples=["rice"])
     province: str | None = Field(default=None, max_length=100, examples=["Chiang Mai"])
     field_size: float | None = Field(default=None, gt=0, description="Field size in hectares")
-    ndvi: list[float] | None = Field(default=None, description="Historical NDVI series")
+    planting_date: str | None = Field(default=None, description="ISO date of planting")
+    horizon_days: int | None = Field(default=None, description="Forecast horizon in days")
+    ndvi: list[Any] | None = Field(default=None, description="NDVI series — floats or {date,ndvi,evi,ndwi} objects")
+    evi: list[Any] | None = Field(default=None, description="EVI series")
+    ndwi: list[Any] | None = Field(default=None, description="NDWI series")
     weather: list[dict] | None = Field(default=None, description="Historical weather series")
 
 
@@ -35,7 +40,9 @@ class TaskOut(BaseModel):
     crop: str
     province: str | None
     field_size: float | None
-    ndvi: list[float] | None
+    ndvi: list[Any] | None
+    evi: list[Any] | None = None
+    ndwi: list[Any] | None = None
     weather: list[dict] | None
     status: TaskStatus
     average_prediction: float | None

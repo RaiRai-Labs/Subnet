@@ -22,3 +22,16 @@ async def init_models() -> None:
         await conn.execute(text("ALTER TABLE prediction_tasks ADD COLUMN IF NOT EXISTS horizon_days INTEGER"))
         await conn.execute(text("ALTER TABLE prediction_tasks ADD COLUMN IF NOT EXISTS evi JSON"))
         await conn.execute(text("ALTER TABLE prediction_tasks ADD COLUMN IF NOT EXISTS ndwi JSON"))
+        # Add 'cancelled' to the task_status enum (new season flow).
+        # ALTER TYPE ADD VALUE cannot run inside a transaction on Postgres < 12;
+        # the IF NOT EXISTS makes it a no-op on repeat runs.
+        await conn.execute(text("ALTER TYPE task_status ADD VALUE IF NOT EXISTS 'cancelled'"))
+        # Drop FK to farms — subnet has no farms table, farm_id is an opaque backend ID.
+        await conn.execute(text(
+            "ALTER TABLE prediction_tasks "
+            "DROP CONSTRAINT IF EXISTS prediction_tasks_farm_id_fkey"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE ground_truth "
+            "DROP CONSTRAINT IF EXISTS ground_truth_farm_id_fkey"
+        ))
