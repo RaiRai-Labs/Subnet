@@ -2,12 +2,13 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.validator import run_validation
+from app.models.response import GroundTruth, MinerResponse
 from app.models.task import PredictionTask, TaskStatus
 from app.schemas.task import TaskAccepted, TaskCreate, TaskOut, ValidationResult
 
@@ -52,12 +53,77 @@ async def validate_task(task_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.get("", response_model=list[TaskOut])
 async def list_tasks(
-    status: TaskStatus | None = None, db: AsyncSession = Depends(get_db)
+    status: TaskStatus | None = None,
+    farm_id: int | None = None,
+    db: AsyncSession = Depends(get_db),
 ):
     stmt = select(PredictionTask).order_by(PredictionTask.created_at.desc())
     if status is not None:
         stmt = stmt.where(PredictionTask.status == status)
+    if farm_id is not None:
+        stmt = stmt.where(PredictionTask.farm_id == farm_id)
     return list(await db.scalars(stmt))
+
+
+@router.get("/predictions", response_model=None)
+async def farm_predictions(
+    farm_id: int,
+    limit: int = Query(default=5, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return top-miner yield predictions for the most recent scored task for a farm.
+
+    Intended to be called by the farmer portal proxy — no auth required because
+    the portal enforces LINE auth before forwarding the request.
+    """
+    task = await db.scalar(
+        select(PredictionTask)
+        .where(
+            PredictionTask.farm_id == farm_id,
+            PredictionTask.status == TaskStatus.scored,
+        )
+        .order_by(PredictionTask.scored_at.desc())
+    )
+    if not task:
+        raise HTTPException(404, "no scored predictions found for this farm yet")
+
+    responses = list(
+        await db.scalars(
+            select(MinerResponse)
+            .where(
+                MinerResponse.task_id == task.id,
+                MinerResponse.weight.isnot(None),
+                MinerResponse.revealed.is_(True),
+                MinerResponse.hash_valid.is_(True),
+            )
+            .order_by(MinerResponse.weight.desc())
+            .limit(limit)
+        )
+    )
+
+    gt = await db.scalar(
+        select(GroundTruth).where(GroundTruth.task_id == task.id)
+    )
+
+    return {
+        "task_id": task.task_id,
+        "farm_id": farm_id,
+        "crop": task.crop,
+        "scored_at": task.scored_at.isoformat() if task.scored_at else None,
+        "actual_yield": gt.actual_yield if gt else None,
+        "predictions": [
+            {
+                "rank": idx + 1,
+                "miner_uid": r.miner_uid,
+                "miner_hotkey": r.miner_hotkey,
+                "predicted_yield": r.expected_yield,
+                "confidence": r.confidence,
+                "mae": r.mae,
+                "weight": r.weight,
+            }
+            for idx, r in enumerate(responses)
+        ],
+    }
 
 
 @router.get("/{task_id}", response_model=TaskOut)

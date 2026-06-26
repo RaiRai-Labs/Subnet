@@ -79,8 +79,11 @@ class BaseValidatorNeuron(BaseNeuron):
         self.collusion_detector = CollusionDetector(
             threshold=float(getattr(self.config.neuron, "collusion_threshold", 0.02))
         )
+        # In live mode persistence is required for deferred scoring to work —
+        # default True. Only False in mock (offline dev) mode, or if explicitly
+        # disabled via --neuron.persist_ranks false.
         self.persist_ranks = bool(
-            getattr(self.config.neuron, "persist_ranks", False)
+            getattr(self.config.neuron, "persist_ranks", not self.config.mock)
         ) and not self.config.mock
         self._async_runner: _AsyncRunner | None = None
         self._challenges_seeded = False
@@ -109,6 +112,129 @@ class BaseValidatorNeuron(BaseNeuron):
         alpha = self.config.neuron.moving_average_alpha
         for uid, reward in zip(uids, rewards):
             self.scores[uid] = alpha * reward + (1 - alpha) * self.scores[uid]
+
+    def drop_scores(self, uids: set[int]) -> None:
+        """Zero EMA scores for miners dropped by liveness handling."""
+        for uid in uids:
+            self.scores[uid] = 0.0
+
+    def persist_task(self, challenge) -> int | None:
+        """Save a live challenge as a PredictionTask in Postgres so the backend
+        can look it up by farm_id when the farmer submits their harvest.
+
+        Returns the PredictionTask PK (used to link MinerResponse rows), or None
+        if persistence is disabled / the challenge has no farm_id.
+
+        No-op unless ``--neuron.persist_ranks`` is set (reuses the same gate).
+        Failures are logged and never fatal.
+        """
+        if not self.persist_ranks or challenge.farm_id is None:
+            return None
+        try:
+            import uuid
+            from app.core.database import AsyncSessionLocal
+            from app.models.task import PredictionTask
+
+            task_id = f"task_{uuid.uuid4().hex[:12]}"
+            syn = challenge.synapse
+
+            async def _do() -> int:
+                async with AsyncSessionLocal() as db:
+                    from sqlalchemy import select as _select
+                    from app.models.task import TaskStatus
+
+                    # One task per (farm, crop, horizon) per season — no duplicates.
+                    existing = await db.scalar(
+                        _select(PredictionTask).where(
+                            PredictionTask.farm_id == challenge.farm_id,
+                            PredictionTask.crop == syn.crop,
+                            PredictionTask.horizon_days == getattr(syn, "horizon_days", None),
+                            PredictionTask.status.in_([TaskStatus.open, TaskStatus.completed]),
+                        )
+                    )
+                    if existing:
+                        bt.logging.debug(
+                            f"[task] skip duplicate — {existing.task_id} already open for "
+                            f"farm_id={challenge.farm_id} crop={syn.crop} "
+                            f"horizon={syn.horizon_days}d"
+                        )
+                        return existing.id
+
+                    task = PredictionTask(
+                        task_id=task_id,
+                        farm_id=challenge.farm_id,
+                        crop=syn.crop,
+                        province=getattr(syn, "province", None),
+                        field_size=getattr(syn, "field_size", None),
+                        planting_date=getattr(syn, "planting_date", None),
+                        horizon_days=getattr(syn, "horizon_days", None),
+                        ndvi=syn.ndvi,
+                        evi=getattr(syn, "evi", None),
+                        ndwi=getattr(syn, "ndwi", None),
+                        weather=syn.weather,
+                    )
+                    db.add(task)
+                    await db.commit()
+                    await db.refresh(task)
+                    return task.id
+
+            if self._async_runner is None:
+                self._async_runner = _AsyncRunner()
+            task_db_id: int = self._async_runner.run(_do())
+            bt.logging.debug(f"[task] persisted task_id={task_id} farm_id={challenge.farm_id}")
+            return task_db_id
+        except Exception as exc:
+            bt.logging.warning(f"task persistence failed: {exc}")
+            return None
+
+    def persist_miner_responses(
+        self,
+        task_db_id: int,
+        valid_preds: dict[int, float],
+    ) -> None:
+        """Save each miner's prediction as a MinerResponse row linked to task_db_id.
+
+        Called in live mode right after query_miners(). Only valid predictions are
+        stored (absent / invalid miners are excluded upstream). Rows are marked
+        revealed=True / hash_valid=True because the subnet dendrite path has no
+        commit-reveal phase — the prediction arrives directly.
+
+        These rows are what _run_scoring() (responses.py) reads when the farmer
+        later submits their actual harvest yield.
+        """
+        if not self.persist_ranks or not valid_preds:
+            return
+        try:
+            from app.core.database import AsyncSessionLocal
+            from app.models.response import MinerResponse
+
+            hotkeys: dict[int, str] = {
+                int(u): self.metagraph.hotkeys[u] for u in self.metagraph.uids
+            }
+
+            async def _do() -> None:
+                async with AsyncSessionLocal() as db:
+                    for uid, prediction in valid_preds.items():
+                        db.add(
+                            MinerResponse(
+                                task_id=task_db_id,
+                                miner_uid=uid,
+                                miner_hotkey=hotkeys.get(uid, ""),
+                                expected_yield=prediction,
+                                revealed=True,
+                                hash_valid=True,
+                            )
+                        )
+                    await db.commit()
+
+            if self._async_runner is None:
+                self._async_runner = _AsyncRunner()
+            self._async_runner.run(_do())
+            bt.logging.debug(
+                f"[task] saved {len(valid_preds)} miner response(s) for task_db_id={task_db_id}"
+            )
+        except Exception as exc:
+            bt.logging.warning(f"miner response persistence failed: {exc}")
 
     def persist_round_ranks(
         self,
