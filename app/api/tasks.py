@@ -85,23 +85,22 @@ async def farm_predictions(
         select(PredictionTask)
         .where(
             PredictionTask.farm_id == farm_id,
-            PredictionTask.status == TaskStatus.scored,
+            PredictionTask.status.in_([TaskStatus.completed, TaskStatus.scored]),
         )
-        .order_by(PredictionTask.scored_at.desc())
+        .order_by(PredictionTask.scored_at.desc(), PredictionTask.completed_at.desc())
     )
     if not task:
-        raise HTTPException(404, "no scored predictions found for this farm yet")
+        raise HTTPException(404, "no predictions found for this farm yet")
 
     responses = list(
         await db.scalars(
             select(MinerResponse)
             .where(
                 MinerResponse.task_id == task.id,
-                MinerResponse.weight.isnot(None),
                 MinerResponse.revealed.is_(True),
                 MinerResponse.hash_valid.is_(True),
             )
-            .order_by(MinerResponse.weight.desc())
+            .order_by(MinerResponse.expected_yield.desc())
             .limit(limit)
         )
     )
