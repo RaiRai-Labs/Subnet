@@ -75,6 +75,11 @@ async def farm_predictions(
 
     Intended to be called by the farmer portal proxy — no auth required because
     the portal enforces LINE auth before forwarding the request.
+
+    Security: predictions are only returned for SCORED tasks. A task is only
+    scored after the farmer submits their actual harvest yield. This means a
+    farmer cannot see what miners predicted before submitting — preventing them
+    from picking a yield value that artificially favours a specific miner.
     """
     task = await db.scalar(
         select(PredictionTask)
@@ -124,6 +129,30 @@ async def farm_predictions(
             for idx, r in enumerate(responses)
         ],
     }
+
+
+@router.post("/farm/{farm_id}/cancel")
+async def cancel_farm_tasks(farm_id: int, db: AsyncSession = Depends(get_db)):
+    """Cancel all open/completed tasks for a farm.
+
+    Called by the backend when a farmer starts a new season (new planting date +
+    crop type). Stale tasks from the previous season must not be scored against
+    the new season's actual yield.
+    """
+    tasks = list(
+        await db.scalars(
+            select(PredictionTask).where(
+                PredictionTask.farm_id == farm_id,
+                PredictionTask.status.in_(
+                    [TaskStatus.open, TaskStatus.completed]
+                ),
+            )
+        )
+    )
+    for task in tasks:
+        task.status = TaskStatus.cancelled
+    await db.commit()
+    return {"farm_id": farm_id, "cancelled_tasks": len(tasks)}
 
 
 @router.get("/{task_id}", response_model=TaskOut)

@@ -132,6 +132,21 @@ def check_database(env: dict) -> None:
         ok(f"DATABASE_URL set (async driver, host={host})")
 
 
+def check_backend_url(env: dict) -> None:
+    url = env.get("BACKEND_URL", "").strip()
+    if not url:
+        err(
+            "BACKEND_URL unset — the validator will fall back to SYNTHETIC challenges "
+            "(no real Thai farm data). Set BACKEND_URL to the farmer backend URL."
+        )
+        return
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        err(f"BACKEND_URL does not look like a valid URL: {url[:50]}")
+        return
+    ok(f"BACKEND_URL={url}")
+
+
 def check_satellite(env: dict) -> None:
     cid, secret = env.get("SH_CLIENT_ID"), env.get("SH_CLIENT_SECRET")
     if not cid and not secret:
@@ -171,7 +186,7 @@ def main() -> None:
     p.add_argument(
         "--skip-wallet",
         action="store_true",
-        help="Skip the wallet check (e.g. for a --mock smoke test).",
+        help="Skip wallet + backend-URL checks (use for --mock / offline smoke tests).",
     )
     args = p.parse_args()
 
@@ -187,6 +202,8 @@ def main() -> None:
     else:
         check_database(env)
         check_satellite(env)
+        if not args.skip_wallet:
+            check_backend_url(env)
     check_observability(env)
 
     print()
