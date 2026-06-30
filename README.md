@@ -5,7 +5,7 @@ prediction (spec: *RaiRai-Labs Subnet MVP Specification v0.1*).
 
 Validators create yield-prediction tasks from farm + satellite + weather data,
 distribute them to miners, collect commit-reveal predictions, and score miners
-against real harvest outcomes (MAE → rank score → normalized consensus weights).
+against real harvest outcomes (dual-metric error → competition rank → winner-take-most weights).
 
 Built with **FastAPI**, **Pydantic v2**, **SQLAlchemy (async)** and **PostgreSQL**,
 managed with **uv**.
@@ -16,8 +16,8 @@ The validator and miner neurons live in `neurons/` (library code in `subnet/`),
 built on the bittensor SDK (`bittensor>=10.4.1`).
 
 - **Validator** poses a yield-prediction task, queries miners over dendrite/axon,
-  scores them (MAE → rank → EMA), and sets normalized weights every
-  `epoch_length` steps — using **commit-reveal** when the subnet has it enabled.
+  scores them (dual-metric error → competition rank → winner-take-most → EMA), and sets
+  normalized weights every `epoch_length` steps — using **commit-reveal** when the subnet has it enabled.
 - **Miner** serves a `YieldPredictionSynapse` axon and returns an expected yield
   (an NDVI-based baseline) with a confidence.
 
@@ -79,8 +79,8 @@ subnet/
     └── forward.py            # query serving miners, score, update scores
 ```
 
-Scoring reuses `app/core/scoring.py` (`mean_absolute_error`, `rank_score`,
-`normalize_weights`); the offline path reuses `app/miners/mock.py`.
+Scoring reuses `app/core/scoring.py` (`dual_metric_error`, `competition_rank`,
+`winner_take_most`, `aggregate_challenge_weights`); the offline path reuses `app/miners/mock.py`.
 `scripts/localnet_e2e.py` runs miner + validator together for a quick smoke test.
 
 ## Project structure
@@ -96,7 +96,7 @@ rairai_subnet/
     │   ├── database.py     # async engine + session (imported from RaiRaiApp)
     │   ├── migrations.py   # create_all bootstrap (no Alembic for MVP)
     │   ├── validator.py    # validator workflow: query miners, average, complete
-    │   └── scoring.py      # MAE, rank score, weight normalization, commit hash
+    │   └── scoring.py      # dual_metric_error, competition_rank, winner_take_most, commit hash
     ├── miners/
     │   └── mock.py         # 3 mock miners with fixed predictions (4.1 / 4.3 / 4.2)
     ├── models/             # SQLAlchemy ORM
@@ -112,7 +112,7 @@ rairai_subnet/
 
 | Table | Purpose |
 |-------|---------|
-| `farms`, `farm_user_links` | Farm registry (imported from RaiRaiApp) |
+| `farms`| Farm registry (imported from RaiRaiApp) |
 | `farm_analysis` | Satellite-derived indices per farm/date (imported) |
 | `prediction_tasks` | Validator-created tasks sent to miners |
 | `miner_responses` | Commit-reveal predictions + per-task scores/weights |
@@ -145,12 +145,12 @@ postgresql+asyncpg://rairai:rairai@localhost:5432/rairai_subnet
 ## Run
 
 ```bash
-uv run uvicorn app.main:app --reload --port 8000
+uv run uvicorn app.main:app --reload --port 8080
 ```
 
-- API: http://127.0.0.1:8000
-- Interactive docs: http://127.0.0.1:8000/docs
-- Health: http://127.0.0.1:8000/health
+- API: http://127.0.0.1:8080
+- Interactive docs: http://127.0.0.1:8080/docs
+- Health: http://127.0.0.1:8080/health
 
 ## API
 
@@ -158,12 +158,14 @@ uv run uvicorn app.main:app --reload --port 8000
 |---------------|-------------|
 | `POST /tasks` | Submit farm/crop data → generates a task id, stores it, confirms acceptance |
 | `POST /tasks/{task_id}/validate` | Run the validator workflow: query mock miners, average, complete the task |
-| `GET /tasks` | List tasks (optional `?status=open\|completed\|closed\|scored`) |
+| `GET /tasks` | List tasks (optional `?status=open\|completed\|closed\|scored\|cancelled` and/or `?farm_id=<id>`) |
 | `GET /tasks/{task_id}` | Get a task (incl. `average_prediction`) |
+| `GET /tasks/predictions?farm_id=<id>&limit=<n>` | Top-miner yield predictions for the most recent **scored** task of a farm |
+| `POST /tasks/farm/{farm_id}/cancel` | Cancel all open/completed tasks for a farm (call when farmer starts a new season) |
 | `POST /responses/commit` | Miner commit phase (submit hash) — advanced commit-reveal path |
 | `POST /responses/reveal` | Miner reveal phase (verifies hash) |
-| `POST /responses/ground-truth` | Farmer reports actual yield |
-| `POST /responses/score/{task_id}` | Score revealed miners → MAE, score, weights |
+| `POST /responses/ground-truth` | Farmer reports actual yield — verifies range + NDVI consistency, then auto-scores |
+| `POST /responses/score/{task_id}` | Manual retry: score revealed miners if they revealed after ground truth was submitted |
 
 ### Mock miners
 
@@ -181,10 +183,19 @@ commit_hash = sha256("{expected_yield}:{confidence}:{nonce}")
 ### Scoring (spec §8–9)
 
 ```
-MAE    = |expected_yield - actual_yield|
-score  = 1 / (1 + MAE)
-weight = score / sum(scores)        # normalized for Yuma Consensus
+MAE              = |predicted - actual|
+RMSE             = sqrt((predicted - actual)²)
+dual_metric_err  = (RMSE + MAE) / 2          # combined error — lower is better
+
+rank             = competition_rank(errors)   # rank 1 = lowest error; ties → average rank
+
+# Winner-take-most weight allocation (winner_share = 0.90 by default):
+#   rank-1 miner(s) receive 90 % of the total weight pool
+#   remaining 10 % split among others inversely proportional to their rank
+weight           = winner_take_most(ranks)    # weights sum to 1 (Yuma Consensus)
 ```
+
+MAE is also stored per-response for inspection; `score` column stores the `dual_metric_err` value.
 
 ## Example flow (MVP: mock miners + averaging)
 
@@ -211,8 +222,36 @@ B=http://127.0.0.1:8000
 curl -X POST $B/responses/reveal -H 'Content-Type: application/json' \
   -d '{"task_id":"task_001","miner_hotkey":"miner_A","expected_yield":4.1,"confidence":0.82,"nonce":"salt"}'
 
+# farmer reports actual yield — verified (range + NDVI consistency), then auto-scored
 curl -X POST $B/responses/ground-truth -H 'Content-Type: application/json' \
-  -d '{"task_id":"task_001","actual_yield":4.5}'
+  -d '{"task_id":"task_001","actual_yield":4.5,"farm_id":1}'
 
+# manual retry only needed if miners revealed after ground truth was submitted
 curl -X POST $B/responses/score/task_001
 ```
+
+Ground truth is verified before scoring:
+1. **Range check** — yield must be within the plausible band (`MIN_YIELD`–`MAX_YIELD`).
+2. **NDVI-consistency check** — report must sit within ±2.0 t/ha of the NDVI-implied yield (`3 + 3 × mean_NDVI`). A lush field claiming near-zero yield is rejected.
+
+Scoring fires automatically when `verified = true`. Once scored, a task is **locked** — a second ground-truth submission is rejected (HTTP 409).
+
+### Season reset
+
+When a farmer starts a new season (new planting date + crop type), cancel stale tasks so they cannot be scored against the new harvest:
+
+```bash
+curl -X POST $B/tasks/farm/1/cancel
+# -> {"farm_id": 1, "cancelled_tasks": 2}
+```
+
+### Viewing predictions (farmer portal)
+
+After scoring, the farmer portal can fetch what miners predicted:
+
+```bash
+curl "$B/tasks/predictions?farm_id=1&limit=5"
+# -> task_id, actual_yield, scored_at, ranked list of {miner, predicted_yield, mae, weight}
+```
+
+Predictions are only returned for **scored** tasks — farmers cannot see miner predictions before submitting their own yield, preventing cherry-picking.
