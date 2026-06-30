@@ -13,18 +13,34 @@ Legend: ⬜ todo · ✅ done · 🟡 partial · 🎯 deliverable · 📎 referen
 
 ---
 
+## Current status (2026-06-29)
+
+| Phase | State | Notes |
+|-------|-------|-------|
+| 1 — Bittensor foundation | ✅ done | neurons, base classes, protocol, config all merged |
+| 2 — Commit-reveal & weights | ✅ done | `set_weights()` auto-detects commit-reveal and routes; *prediction* anti-copying replaced by collusion detection + deferred scoring (see Phase 2 note) |
+| 3 — Scoring & incentive | ✅ done | dual-metric, competition rank, winner-take-most, aggregate all live in `app/core/scoring.py`; rolling history in `subnet/validator/rank_history.py` |
+| 4 — Anti-gaming & data | ✅ done (1 gap) | code complete; **live Sentinel Hub unverified** — needs valid CDSE `SH_CLIENT_*` creds to exercise end-to-end |
+| 5 — Ops & farmer backend | 🟡 partial | ops half ✅ (PM2, auto-update, setup, observability, **tests + CI**, guides); **farmer portal + validator proxy API still TODO** (owned separately) |
+
+**Remaining work:** validator proxy API · farmer portal flow · live satellite
+verification (blocked on creds) · first live on-chain deploy (only proven in
+`--mock` so far).
+
+---
+
 ## Phase 1 — Bittensor Foundation
 
 Stand up the neuron layer so we have wallets, hotkeys, UIDs, metagraph, and
 axon/dendrite messaging. Nothing else works without this.
 
-- ⬜ Add `bittensor` SDK to dependencies; pin a version (Zeus uses `9.9.0`).
-- ⬜ Create `zeus/base`-equivalent base classes: `BaseNeuron`, `BaseValidatorNeuron`, `BaseMinerNeuron` (run-loop, registration check, metagraph resync, background thread, context-manager lifecycle).
-- ⬜ Define the protocol/synapse: a `YieldPredictionSynapse` (request: farm/crop/NDVI/weather features; response: `expected_yield`, `confidence`). 📎 `zeus/protocol.py`
-- ⬜ Implement `neurons/miner.py`: serve axon, attach `forward`/`blacklist`/`priority`, return a (stub) prediction.
-- ⬜ Implement `neurons/validator.py`: dendrite query of miners, metagraph sync, skeleton `forward()`.
-- ⬜ Config plumbing: wallet name/hotkey, netuid, subtensor endpoint, axon port (env-driven, mirroring `miner.env` / `validator.env`).
-- ⬜ Stand up / connect to a local subtensor (or testnet netuid) for integration testing.
+- ✅ Add `bittensor` SDK to dependencies; pin a version (using `>=10.4.1`).
+- ✅ Create `zeus/base`-equivalent base classes: `BaseNeuron`, `BaseValidatorNeuron`, `BaseMinerNeuron` (run-loop, registration check, metagraph resync, background thread, context-manager lifecycle).
+- ✅ Define the protocol/synapse: a `YieldPredictionSynapse` (request: farm/crop/NDVI/weather features; response: `expected_yield`, `confidence`). 📎 `subnet/protocol.py`
+- ✅ Implement `neurons/miner.py`: serve axon, attach `forward`/`blacklist`/`priority`, return a (stub) prediction.
+- ✅ Implement `neurons/validator.py`: dendrite query of miners, metagraph sync, skeleton `forward()`.
+- ✅ Config plumbing: wallet name/hotkey, netuid, subtensor endpoint, axon port (env-driven).
+- 🟡 Stand up / connect to a local subtensor (or testnet netuid) for integration testing — `docs/localnet.md` exists; first real on-chain run is tonight's deploy.
 - 🎯 A validator can register, query a miner over axon/dendrite on testnet, and get a yield prediction back.
 - 📎 `zeus/base/{neuron,validator,miner}.py`, `neurons/{validator,miner}.py`
 
@@ -35,14 +51,11 @@ axon/dendrite messaging. Nothing else works without this.
 Make the anti-copying scheme trustless and actually pay miners on chain (Yuma).
 Replaces our current "POST a hash, we recompute and trust it" flow.
 
-- ⬜ Commitment encoding: pack per-task prediction hashes into bytes for the Subtensor `Commitments` pallet, with `committed_at_block`. 📎 `zeus/commitment.py`
-- ⬜ Miner commit phase: `sha256(compressed_prediction + hotkey)` → `commit_to_chain(...)` at scheduled blocks.
-- ⬜ Validator hash phase: read commitments back **from chain**, reject stale (> N blocks old). 📎 `COMMITMENT_MAX_BLOCKS_OLDER`, `hash_phase.py`
-- ⬜ Validator reveal/verify: query predictions over axon, recompute hash over the exact committed bytes, mark mismatches as cheating. 📎 `responses_processing.py::_verify_hashes`
-- ⬜ Define a deterministic, hashable serialization for predictions (scalar yield is simple; standardize encoding so commit == reveal byte-for-byte). 📎 `zeus/utils/compression.py`
-- ⬜ Epoch timing: `time_till_next_epoch`, set-weights window, chain rate-limit handling. 📎 `time_till_next_epoch.py`, `weight_setter.py`
-- ⬜ Background `WeightSetter`: normalize → `process_weights_for_netuid` → uint16 → `subtensor.set_weights(...)`.
-- 🎯 End-to-end commit-reveal verified against chain state, and weights land on chain once per epoch.
+- ✅ On-chain **weight** commit-reveal: `set_weights()` detects `subtensor.commit_reveal_enabled(netuid)` and routes accordingly. 📎 `subnet/base/validator.py`
+- 🔀 *Prediction* commit-reveal (per-task hash committed to chain, revealed later) was **descoped** — predictions arrive directly over dendrite and anti-copying is handled by collusion detection + deferred scoring instead. *(Confirm team is OK with this vs. the original spec.)*
+- ✅ Epoch timing: set-weights window + chain rate-limit handling (`weights_rate_limit`). 📎 `subnet/base/validator.py::set_weights`
+- ✅ Weight setting: normalize → uint16 → `subtensor.set_weights(...)` once per window. 📎 `subnet/base/validator.py`
+- 🎯 Weights land on chain once per epoch (verified in `--mock`; live confirmation = tonight's deploy).
 - 📎 `zeus/validator/{hash_phase,prediction_phase,weight_setter,time_till_next_epoch}.py`
 
 ---
@@ -53,11 +66,11 @@ Replace the toy `score = 1/(1+MAE)` with a real, gameable-resistant incentive
 curve and rolling performance history.
 
 - ✅ Challenge taxonomy: model multiple challenges (e.g. crop × forecast-horizon) each with its own weight, instead of one undifferentiated task. 📎 `subnet/validator/challenge_spec.py`
-- ⬜ Dual-metric scoring: `(RMSE + MAE)/2`; add region/importance weighting analog (e.g. weight key provinces). 📎 `metrics.py`, `reward.py::calculate_scores`
-- ⬜ Competition ranking with tie handling. 📎 `reward.py::calculate_competition_ranks`
+- ✅ Dual-metric scoring: `(RMSE + MAE)/2`. 📎 `app/core/scoring.py::dual_metric_error`
+- ✅ Competition ranking with tie handling (ties share the averaged rank). 📎 `app/core/scoring.py::competition_rank`
 - ✅ Rolling rank history: persist per-challenge ranks (use our **Postgres**, not SQLite), average last N rounds with recency tie-breaker. 📎 `subnet/validator/rank_history.py`, `app/core/rank_history.py`
-- ⬜ Winner-take-most distribution: 95% to best + logarithmic remainder. 📎 `reward.py::calculate_challenge_weights`, `PERCENTAGE_GOING_TO_WINNER`
-- ⬜ Aggregate weights across challenges by effective weight. 📎 `weight_setter.py`
+- ✅ Winner-take-most distribution (90% to best + remainder by inverse rank). 📎 `app/core/scoring.py::winner_take_most`
+- ✅ Aggregate weights across challenges by effective weight. 📎 `app/core/scoring.py::aggregate_challenge_weights`
 - ✅ New tables: `challenge`, `challenge_rank_history`, `best_miners` (extend existing `prediction_tasks`/`miner_responses`). 📎 `app/models/challenge.py`
 - 🎯 Weights reflect sustained, multi-round, multi-challenge performance — not a single lucky prediction.
 - 📎 `zeus/validator/{reward,metrics,challenge_spec}.py`, `zeus/utils/results_state.py`
@@ -90,13 +103,15 @@ Data pipeline:
 Make it runnable unattended in production, and repurpose the existing FastAPI app
 as the off-chain farmer portal/backend (spec §12) rather than a fake neuron.
 
-- ⬜ Process management: PM2 launch scripts for validator & miner. 📎 `start_validator.sh`, `start_miner.sh`
-- ⬜ Auto-update + self-heal runner (git fetch/reset + reinstall + periodic restart). 📎 `run_neuron.py`
-- ⬜ `setup.sh` (system deps, TCP tuning) and `min_compute.yml` (hardware baselines). 📎 Zeus root
-- ⬜ Repurpose current FastAPI app: farm registration, yield-forecast display, yield reporting → writes to Postgres, feeds the validator (keep `docker-compose.yml` for the backend/db/redis).
-- ⬜ Optional validator proxy API (serve top-miner predictions to the farmer app). 📎 Zeus `--proxy.port`
-- ⬜ Observability: structured logging, optional Discord/webhook alerts, performance metrics export. 📎 `performance_database_connection.py`
-- ⬜ Validator & miner operator guides. 📎 `docs/Validating.md`, `docs/Mining.md`
+- ✅ Process management: PM2 launch scripts + one-command ecosystem bring-up. 📎 `scripts/start_validator.sh`, `scripts/start_miner.sh`, `ecosystem.config.js`
+- ✅ Auto-update + self-heal runner (git fetch/reset + reinstall + periodic restart). 📎 `scripts/run_neuron.py`
+- ✅ `setup.sh` (system deps, TCP tuning, pm2-logrotate, opt-in firewall) and `min_compute.yml` (hardware baselines).
+- ✅ Pre-launch config doctor + heartbeat staleness monitor. 📎 `scripts/preflight.py`, `scripts/healthcheck.py`
+- ✅ Observability: structured logging, optional Discord/webhook alerts, JSON heartbeat metrics. 📎 `subnet/observability.py`
+- ✅ Test suite + CI (pytest, GitHub Actions). 📎 `tests/`, `.github/workflows/ci.yml`
+- ✅ Validator & miner operator guides. 📎 `docs/Validating.md`, `docs/Mining.md`
+- ⬜ Repurpose current FastAPI app: farm registration, yield-forecast display, yield reporting → writes to Postgres, feeds the validator *(owned separately)*.
+- ⬜ Optional validator proxy API (serve top-miner predictions to the farmer app) *(owned separately)*. 📎 Zeus `--proxy.port`
 - 🎯 A third party can stand up a validator or miner from the docs and it stays running; farmers interact via the web backend.
 - 📎 Zeus: `run_neuron.py`, `start_*.sh`, `setup.sh`, `min_compute.yml`, `docs/`
 
