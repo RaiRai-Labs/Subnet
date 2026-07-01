@@ -49,17 +49,19 @@ const env = { ...loadEnv(path.join(__dirname, '.env')), ...process.env };
 
 const pair = (flag, key) => (env[key] ? [flag, env[key]] : []);
 
-const neuronArgs = (module, extra) =>
+const neuronArgs = (module, walletNameKey, walletHotkeyKey, extra) =>
   [
     'run', 'python', '-m', module,
     ...pair('--netuid', 'NETUID'),
     ...pair('--subtensor.network', 'SUBTENSOR_NETWORK'),
-    ...pair('--wallet.name', 'WALLET_NAME'),
-    ...pair('--wallet.hotkey', 'WALLET_HOTKEY'),
+    ...pair('--wallet.name', walletNameKey),
+    ...pair('--wallet.hotkey', walletHotkeyKey),
+    ...pair('--wallet.path', 'WALLET_PATH'),
     ...extra,
   ].join(' ');
 
 const minerExtra = [
+  ...pair('--axon.ip', 'AXON_IP'),
   ...pair('--axon.port', 'AXON_PORT'),
   ...pair('--axon.external_ip', 'AXON_EXTERNAL_IP'),
 ];
@@ -80,13 +82,19 @@ module.exports = {
       ...common,
       name: 'rairai-validator',
       script: 'uv',
-      args: neuronArgs('neurons.validator', []),
+      args: neuronArgs('neurons.validator', 'VALIDATOR_WALLET_NAME', 'VALIDATOR_WALLET_HOTKEY', ['--neuron.persist_ranks']),
     },
     {
       ...common,
       name: 'rairai-miner',
       script: 'uv',
-      args: neuronArgs('neurons.miner', minerExtra),
+      args: neuronArgs('neurons.miner', 'MINER_WALLET_NAME', 'MINER_WALLET_HOTKEY', minerExtra),
+    },
+    {
+      ...common,
+      name: 'rairai-api',
+      script: 'uv',
+      args: ['run', 'uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', env.API_PORT || '8080'].join(' '),
     },
     {
       ...common,
