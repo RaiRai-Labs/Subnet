@@ -104,16 +104,24 @@ def get_query_uids(validator) -> list[int]:
     ]
 
 
-def query_miners(validator, challenge: Challenge, uids: list[int]) -> list[float | None]:
-    """Return each miner's predicted yield (None if it did not respond)."""
+def query_miners(
+    validator, challenge: Challenge, uids: list[int]
+) -> tuple[list[float | None], dict[int, float]]:
+    """Return (yields, confidences) for each miner. yields[i] is None if miner did not respond."""
     if validator.config.mock:
-        return [miner.predict(challenge.synapse) for miner in MOCK_MINERS]
+        return [miner.predict(challenge.synapse) for miner in MOCK_MINERS], {}
 
     axons = [validator.metagraph.axons[uid] for uid in uids]
-    responses = validator.dendrite.query(
-        axons=axons, synapse=challenge.synapse, deserialize=True
+    synapses = validator.dendrite.query(
+        axons=axons, synapse=challenge.synapse, deserialize=False
     )
-    return list(responses)
+    yields = [s.expected_yield for s in synapses]
+    confidences = {
+        uid: s.confidence
+        for uid, s in zip(uids, synapses)
+        if s.confidence is not None
+    }
+    return yields, confidences
 
 
 def forward(validator) -> None:
@@ -165,7 +173,7 @@ def forward(validator) -> None:
             challenge = generate_challenge(spec=spec)
             task_db_id = None
 
-        predictions = query_miners(validator, challenge, uids)
+        predictions, confidences = query_miners(validator, challenge, uids)
 
         # Miners that did not respond at all.
         absent: set[int] = {u for u, p in zip(uids, predictions) if p is None}
@@ -185,7 +193,7 @@ def forward(validator) -> None:
         # Live mode: persist each miner's prediction so _run_scoring() can score
         # them months later when the farmer submits their actual harvest yield.
         if live_mode and task_db_id is not None:
-            validator.persist_miner_responses(task_db_id, valid_preds)
+            validator.persist_miner_responses(task_db_id, valid_preds, confidences)
 
         # Record this challenge's predictions for future collusion detection.
         # Use prior_colluders (detected before this round) so colluder status

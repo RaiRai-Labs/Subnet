@@ -191,6 +191,7 @@ class BaseValidatorNeuron(BaseNeuron):
         self,
         task_db_id: int,
         valid_preds: dict[int, float],
+        confidences: dict[int, float] | None = None,
     ) -> None:
         """Save each miner's prediction as a MinerResponse row linked to task_db_id.
 
@@ -213,18 +214,30 @@ class BaseValidatorNeuron(BaseNeuron):
             }
 
             async def _do() -> None:
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
                 async with AsyncSessionLocal() as db:
                     for uid, prediction in valid_preds.items():
-                        db.add(
-                            MinerResponse(
+                        hotkey = hotkeys.get(uid, "")
+                        stmt = (
+                            pg_insert(MinerResponse)
+                            .values(
                                 task_id=task_db_id,
                                 miner_uid=uid,
-                                miner_hotkey=hotkeys.get(uid, ""),
+                                miner_hotkey=hotkey,
                                 expected_yield=prediction,
+                                confidence=confidences.get(uid) if confidences else None,
                                 revealed=True,
                                 hash_valid=True,
                             )
+                            .on_conflict_do_update(
+                                constraint="uq_task_miner",
+                                set_={
+                                    "expected_yield": prediction,
+                                    "confidence": confidences.get(uid) if confidences else None,
+                                },
+                            )
                         )
+                        await db.execute(stmt)
                     await db.commit()
 
             if self._async_runner is None:
